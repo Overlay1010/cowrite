@@ -146,18 +146,19 @@ def test_lift_makes_hats_busier_in_that_range():
 
 
 def test_lift_that_drums_cannot_fill_gets_a_layer():
-    """하이햇만 촘촘하게 해서는 안 차면 코드가 그 구간에만 반주를 더한다. 이 곡은 멜로디가 9~12마디에서 쉬는데,
-    예전엔 읽을 코드가 없어 화음 · 베이스가 비고 드럼만 남았다 — 이제 13~16마디 진행을 되풀이해 채워서 실제로 꽉 찬다."""
+    """하이햇만 촘촘하게 해서는 안 차면 코드가 그 구간에만 화음 한 겹을 더한다 — 로파이 반주는 일부러 성기게 쳐서
+    8분음표 아르페지오부터. 이 곡은 멜로디가 9~12마디에서 쉬는데, 예전엔 읽을 코드가 없어 화음 · 베이스가 비고 드럼만 남았다
+    — 이제 13~16마디 진행을 되풀이해 채워서 실제로 꽉 찬다."""
     song = lofi("Lead")
     r = run_tool(song, "arrange", {"style": "lofi", "parts": [{"role": "drums"}, {"role": "bass"}, {"role": "pad"}],
                                    "lift": [{"bars": [9, 16], "energy": "higher"}]})
     auto = [p for p in r.view["arrange"]["parts"] if p.get("auto")]
-    assert [p["role"] for p in auto] == ["keys"] and auto[0]["bars"] == "9~16마디"
-    keys = by_name(r.project, auto[0]["tracks"][0])
-    assert min(n.start for n in keys.notes) >= 32 - 1e-6
-    assert "그 구간에만 반주를 더했어요" in r.summary
+    assert [p["role"] for p in auto] == ["arp"] and auto[0]["bars"] == "9~16마디"
+    arp = by_name(r.project, auto[0]["tracks"][0])
+    assert min(n.start for n in arp.notes) >= 32 - 1e-6
+    assert "그 구간에만 아르페지오를 더했어요" in r.summary
     lift = r.data["review"]["lifts"][0]
-    assert lift["ok"] and "drum_only_bars" not in lift
+    assert lift["ok"] and "drum_only_bars" not in lift, lift
     pad = by_name(r.project, "Pad")
     assert any(32 <= n.start < 48 for n in pad.notes)  # 9~12마디에도 패드가 있다
     assert "9~12마디는 멜로디가 쉬어 코드를 못 읽어 13~16마디 진행을 되풀이해 채웠어요" in detail(r)
@@ -287,3 +288,75 @@ def test_review_of_clean_song_has_no_problems():
     kick = Track(id="t3", name="Kick", program=0, is_drum=True, notes=notes((min(PARTS["kick"]), 0, 0.2)))
     r = review(Project(id="r", tracks=[lead, bass, kick]), {"t2"})
     assert r.problems == [] and r.kick_lock == 1.0
+
+
+# ---------- 반주 높이 · 장르 리듬 · 코드 색 ----------
+
+
+def riff_with_bass() -> Project:
+    """앞 4마디는 G4 근처, 뒤 4마디는 옥타브 아래(G3 근처)에서 되풀이하는 리프 + 베이스 (tests/test_harmonize.py).
+    레가토로 겹치게 하면 조성을 G 장조로 읽는다 (조성 읽기의 약점 — 멜로디로 알아보는 건 test_harmonize에서)."""
+    from tests.test_harmonize import riff_song
+
+    p = riff_song()
+    bass = Track(id="t2", name="Bass", program=33, notes=notes(*[(r, b * 4.0, 4.0) for b, r in enumerate([43, 39, 36, 43] * 2)]))
+    return p.model_copy(update={"tracks": [*p.tracks, bass]})
+
+
+def test_comp_stays_off_the_melody_in_each_phrase():
+    """반주 높이는 4마디마다: 멜로디가 높은 앞쪽은 멜로디 아래, 멜로디가 낮아 아래가 탁한 뒤쪽은 멜로디 위.
+    예전엔 곡 전체로 한 번 정해 반주가 멜로디와 같은 G3~G4에 깔렸다 (Sphinx)."""
+    from app.generate.chords import CLEAR, GAP, chord_notes
+
+    p = riff_with_bass()
+    made, _ = chord_notes(p, pattern="stab", program=0)
+    lead = p.tracks[0].notes
+    for a, b, below in ((0, 16, True), (16, 32, False)):
+        tune = [n.pitch for n in lead if a <= n.start < b]
+        comp = [n.pitch for n in made if a <= n.start < b]
+        assert (max(comp) < min(tune)) if below else (min(comp) > max(tune))
+    # 베이스가 있으면 D3(CLEAR) 아래로 화음을 쌓지 않는다 (탁함) — 보이싱은 음역 끝을 GAP만큼 넘을 수 있다
+    assert min(n.pitch for n in made if n.start < 16) >= CLEAR - GAP
+
+
+def test_soul_comp_pushes_into_next_chord_with_sevenths():
+    """소울: 두 마디 리듬으로 당겨 치고(코드가 바뀌기 반 박 앞에서 다음 코드), 7 · 9음을 넣고, 세기가 자리마다 다르다.
+    멜로디가 짧은 Ab을 계속 찍는 Gm에는 9음(A)을 넣지 않는다. 검사(코드 밖 · 겹침)에 걸리는 것 없음."""
+    from app.generate.check import check
+    from app.generate.chords import chord_notes
+
+    p = riff_with_bass()
+    made, plan = chord_notes(p, pattern="stab", program=0, style="soul")
+    assert "소울 당겨 치기" in plan.feel and "7 · 9음" in plan.feel
+    names = {c.name for c in plan.chords}
+    assert any(n.endswith(("7", "9")) for n in names) and "Gm9" not in names
+    pushed = [n for n in made if abs(n.start % 4 - 3.5) < 1e-6 and n.start + n.duration > n.start + 0.5 + 1e-6]
+    assert pushed and all(any(c.start == n.start and n.pitch % 12 in tones(c) for c in plan.chords) for n in pushed)
+    assert len({n.velocity for n in made}) > 3
+    assert check(made, plan.program, chords=plan.chords) == []
+
+
+def tones(chord) -> set[int]:
+    from app.harmony.reharm import INTERVALS
+
+    return {(chord.root + i) % 12 for i in INTERVALS[chord.quality]}
+
+
+def test_said_progression_keeps_its_names_under_a_style():
+    """사용자가 말한 진행은 장르가 있어도 말한 그대로 (7 · 9음을 더하지 않는다)."""
+    from app.generate.chords import chord_notes
+
+    _, plan = chord_notes(riff_with_bass(), pattern="stab", program=0, style="soul", progression=["Gm", "Eb"])
+    assert {c.name for c in plan.chords} == {"Gm", "Eb"}
+
+
+def test_range_overlap_is_checked_per_phrase():
+    """음역 겹침은 4마디 묶음마다 — 멜로디가 옥타브를 바꾸고 반주가 묶음마다 비켜 가면 겹치지 않은 것."""
+    lead = Track(id="t1", name="Lead", program=0, notes=notes(*[(62 + i * 3 % 14, i * 1.0, 1.0) for i in range(16)],
+                                                               *[(50 + i * 3 % 14, 16 + i * 1.0, 1.0) for i in range(16)]))
+    comp = Track(id="t2", name="Keys", program=0, notes=notes(*[(p, b * 4.0 + i, 1.0) for b in range(4) for i in range(4) for p in (50, 55, 58)],
+                                                             *[(p, 16 + b * 4.0 + i, 1.0) for b in range(4) for i in range(4) for p in (65, 70, 74)]))
+    assert overlaps(Project(id="o", tracks=[lead, comp]), {"t2"}) == []
+    same = comp.model_copy(update={"notes": notes(*[(p, b * 4.0 + i, 1.0) for b in range(8) for i in range(4) for p in (60, 64, 67, 71, 76)])})
+    found = overlaps(Project(id="o", tracks=[lead, same]), {"t2"})
+    assert len(found) == 1 and found[0].startswith("1~4마디에서")

@@ -96,6 +96,9 @@ class GenerateChordsArgs(_MakeArgs):
     height: Literal["low", "mid", "high"] | None = Field(
         default=None, description="음역. 말이 없으면 비워 둬 — 베이스와 멜로디 사이 빈 곳. low · high는 거기서 반 옥타브쯤 아래 · 위",
     )
+    style: Literal["lofi", "boombap", "house", "trap", "pop", "rock", "funk", "soul", "jazz", "latin"] | None = Field(
+        default=None, description="장르. 말했을 때만 — 반주 리듬(소울 당겨 치기 · 펑크 16분 …)과 코드 색(소울 · 재즈 · 로파이 · 붐뱁 · 펑크는 7 · 9음)",
+    )
 
 
 class GenerateBasslineArgs(_MakeArgs):
@@ -183,7 +186,8 @@ def _make(
 
 def generate_chords(project: Project, args: GenerateChordsArgs) -> ToolResult:
     def make(song: Project, start: float, end: float | None, program: int | None, version: int):
-        return chord_notes(song, start, end, args.height, program, version, args.pattern, args.progression, args.bars_per_chord)
+        return chord_notes(song, start, end, args.height, program, version, args.pattern, args.progression, args.bars_per_chord,
+                           args.style)
 
     return _make(project, args, make, TRACK_NAMES[args.pattern], f"{PATTERN_KO[args.pattern]}로")
 

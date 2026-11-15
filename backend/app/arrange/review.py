@@ -3,7 +3,7 @@
 생성 검사(app/generate/check.py)는 트랙 하나만 본다. 여기서는 트랙끼리 본다:
 - 반음 부딪힘: 서로 다른 트랙의 두 음이 단2도 · 단9도(아래 음에서 반음 + 옥타브들)로 0.5박 넘게 같이 울린다.
   장7도(C 위의 B)는 maj7 화음의 정상 음이라 세지 않는다. 새 트랙이 낀 것만 센다 (원래 곡끼리 부딪히는 건 사용자의 음악)
-- 음역 겹침: 새 화음 트랙(패드 · 반주 · 아르페지오)이 소리 성격이 같은 다른 트랙과 같은 높이를 7반음 넘게 같이 쓴다
+- 음역 겹침: 새 화음 트랙(패드 · 반주 · 아르페지오)이 소리 성격이 같은 다른 트랙과 4마디 묶음 안에서 같은 높이를 7반음 넘게 같이 쓴다
 - 구간 에너지: "9마디부터 더 꽉 차게"(lift)라고 했으면 그 구간이 나머지보다 실제로 꽉 찼는지 (구간 읽기와 같은 에너지 잣대)
 - 베이스 · 킥: 베이스가 킥과 같이 치는 비율 (정보 — 문제로 치지 않음)
 음을 고치지 않는 순수 함수. 문제는 사람이 읽는 말로 적는다 (LLM이 그대로 전하고 고칠 방법을 고르게).
@@ -26,6 +26,7 @@ SHARED = 7  # 반음. 두 화음 트랙이 이만큼 넘게 같은 높이를 쓰
 LIFT_GAP = 0.05  # 더 꽉 차게 한 구간은 나머지보다 에너지(0~1)가 이만큼은 높아야 (다른 구간으로 나누는 차이는 0.15)
 LONG = 1.0  # 박. 음 길이 가운데값이 이보다 길면 길게 끄는 소리
 KICK_NEAR = 0.06  # 박. 킥과 이만큼 안에서 치면 같이 친 것
+PHRASE = 4  # 마디. 음역 겹침을 이만큼씩 따로 본다
 
 
 def note_name(pitch: int) -> str:
@@ -56,7 +57,7 @@ class Lift:
 class Review:
     clash_beats: float  # 새 트랙이 낀 반음 부딪힘 (박)
     clashes: list[Clash]  # 많이 부딪힌 곳부터 (최대 5)
-    overlaps: list[str]  # "Arp(D3~E5)가 Pad(C3~E4)와 9반음 겹쳐요"
+    overlaps: list[str]  # "1~4마디에서 Arp(D3~E5)가 Pad(C3~E4)와 9반음 겹쳐요"
     lifts: list[Lift]
     kick_lock: float | None  # 베이스가 킥과 같이 친 비율 (킥 · 베이스가 있을 때)
     problems: list[str] = field(default_factory=list)
@@ -123,22 +124,35 @@ def _long(track: Track) -> bool:
 
 def overlaps(project: Project, new_ids: set[str]) -> list[str]:
     """새 화음 트랙(베이스 말고)이 소리 성격이 같은(길게 끄는 · 짧게 치는) 다른 트랙과 같은 높이를 SHARED반음 넘게 같이 쓰면.
-    길게 끄는 패드 위에서 짧게 끊어 치는 반주가 같은 높이를 쓰는 건 흔한 편곡이라 치지 않는다 (음이 반음으로 부딪히면 clashes가 잡는다)."""
+    길게 끄는 패드 위에서 짧게 끊어 치는 반주가 같은 높이를 쓰는 건 흔한 편곡이라 치지 않는다 (음이 반음으로 부딪히면 clashes가 잡는다).
+    PHRASE마디 묶음마다 둘 다 치는 곳에서 비교하고 가장 많이 겹친 묶음을 적는다 — 곡 전체 음역으로 보면 멜로디가 옥타브를
+    내려 되풀이하는 곡(Sphinx)에서 반주가 묶음마다 멜로디를 비켜 가도 겹친다고 했다."""
     tracks = [t for t in _melodic(project) if not _is_bass(t)]
+    span = PHRASE * project.beats_per_bar
     out = []
     for t in tracks:
         if t.id not in new_ids:
             continue
-        lo, hi = _span(t.notes)
         for other in tracks:
             if other is t or (other.id in new_ids and other.id < t.id):  # 새 트랙끼리는 한 번만
                 continue
             if _long(other) != _long(t):
                 continue
-            olo, ohi = _span(other.notes)
-            shared = min(hi, ohi) - max(lo, olo)
-            if shared > SHARED:
-                out.append(f"{t.name}({note_name(lo)}~{note_name(hi)})가 {other.name}({note_name(olo)}~{note_name(ohi)})와 "
+            worst = None
+            last = max(n.start for n in [*t.notes, *other.notes])
+            for k in range(int(last // span) + 1):
+                mine = [n for n in t.notes if k * span <= n.start < (k + 1) * span]
+                theirs = [n for n in other.notes if k * span <= n.start < (k + 1) * span]
+                if not mine or not theirs:
+                    continue
+                (lo, hi), (olo, ohi) = _span(mine), _span(theirs)
+                shared = min(hi, ohi) - max(lo, olo)
+                if shared > SHARED and (worst is None or shared > worst[0]):
+                    worst = (shared, k, lo, hi, olo, ohi)
+            if worst:
+                shared, k, lo, hi, olo, ohi = worst
+                where = f"{k * PHRASE + 1}~{(k + 1) * PHRASE}마디에서 "
+                out.append(f"{where}{t.name}({note_name(lo)}~{note_name(hi)})가 {other.name}({note_name(olo)}~{note_name(ohi)})와 "
                            f"{shared}반음 겹쳐요")
     return out
 

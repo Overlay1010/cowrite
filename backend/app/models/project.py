@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import math
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class Note(BaseModel):
@@ -68,6 +69,17 @@ class Track(BaseModel):
             return None
         pitches = [n.pitch for n in self.notes]
         return min(pitches), max(pitches)
+
+    @field_validator("name")
+    @classmethod
+    def _visible_name(cls, name: str, info: ValidationInfo) -> str:
+        """보이지 않는 제어 문자(\x00 같은 것)를 뺀 이름. 빈 이름이 되면 "Track 번호". MIDI를 읽을 때도 빼지만(convert),
+        그 전에 올린 곡(Sphinx)은 저장된 이름에 남아 있어 점검 문구에 트랙 이름이 빈칸으로 나왔다."""
+        clean = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
+        if clean:
+            return clean
+        number = re.sub(r"\D", "", str(info.data.get("id", "")))
+        return f"Track {number}" if number else "Track"
 
 
 class Project(BaseModel):

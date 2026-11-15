@@ -45,6 +45,10 @@ GENRE_KEYS = {"jazz": 0, "soul": 4, "lofi": 0, "boombap": 4, "rock": 0, "latin":
 # 깔려 "진짜 유치한 악기들"이라는 말을 들었다 (2026-11-13). 고음질 녹음이 있는 피아노(Salamander) · 핑거 베이스로,
 # 패드는 고음질 녹음이 없어 신스 느낌이 덜한 따뜻한 패드로
 GENRE_PAD = {"lofi": 89}
+SPARSE_COMP = {"lofi", "trap", "boombap"}  # 반주 리듬이 성긴 장르 (app/generate/chords.py GENRE_COMP)
+# 꽉 채우려고 더하는 아르페지오는 16분음표로 (chords.ARP_STYLES 3번째). 8분음표로는 예전 반주(마디당 16음)보다 덜 차서
+# 드럼이 촘촘하게 나온 날엔 "더 꽉 차게"가 안 찼다
+LIFT_ARP = 3
 
 
 class PartPlan(BaseModel):
@@ -134,7 +138,8 @@ def _drums(project: Project, part: PartPlan, args: ArrangeArgs, song_bars: int) 
                       summary=" · ".join(lines), checks=first.checks)
 
 
-def _run_part(project: Project, part: PartPlan, args: ArrangeArgs, song_bars: int, height: str | None) -> ToolResult:
+def _run_part(project: Project, part: PartPlan, args: ArrangeArgs, song_bars: int, height: str | None,
+              version: int = 1) -> ToolResult:
     if part.role == "drums":
         return _drums(project, part, args, song_bars)
     if part.role == "bass":
@@ -148,7 +153,7 @@ def _run_part(project: Project, part: PartPlan, args: ArrangeArgs, song_bars: in
         program = {"keys": GENRE_KEYS, "pad": GENRE_PAD}.get(part.role, {}).get(args.style or "")
     return generate_chords(project, GenerateChordsArgs(
         pattern=PATTERN[part.role], height=part.height or height, program=program,  # type: ignore[arg-type]
-        progression=args.progression, bars_per_chord=args.bars_per_chord, bars=part.bars,
+        progression=args.progression, bars_per_chord=args.bars_per_chord, bars=part.bars, style=args.style, version=version,
     ))
 
 
@@ -161,12 +166,14 @@ def _fill_lifts(project: Project, args: ArrangeArgs, parts: list[PartPlan], new_
     for lf in review(project, new_ids, wanted).lifts:
         if lf.ok or lf.energy != "higher":
             continue
-        role: Role | None = next((r for r in ("keys", "arp") if r not in used), None)
+        # 로파이 · 트랩 · 붐뱁 반주는 일부러 성기게(두 마디에 네 번쯤) 쳐서 더해도 안 찬다 → 8분음표 아르페지오부터
+        order = ("arp", "keys") if args.style in SPARSE_COMP else ("keys", "arp")
+        role: Role | None = next((r for r in order if r not in used), None)
         if role is None:
             continue
         part = PartPlan(role=role, bars=lf.bars)
         try:
-            res = _run_part(project, part, args, 0, STACK[role])
+            res = _run_part(project, part, args, 0, STACK[role], LIFT_ARP if role == "arp" else 1)
         except ToolError:
             continue
         assert res.project is not None

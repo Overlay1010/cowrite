@@ -193,3 +193,11 @@ def test_control_characters_dropped_from_track_names():
     buf = io.BytesIO()
     pm.write(buf)
     assert [t.name for t in midi_bytes_to_project(buf.getvalue()).tracks] == ["Track 1", "Lead"]
+
+
+def test_saved_track_names_drop_control_characters():
+    """MIDI를 읽을 때 빼기 전에 올린 곡도 불러오면 보이지 않는 글자를 뺀다 (빈 이름이 되면 Track 번호)."""
+    from app.models.project import Track
+
+    assert Track(id="t1", name="\x00").name == "Track 1"
+    assert Track(id="t3", name="Lead\x01 ").name == "Lead"

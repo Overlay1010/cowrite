@@ -413,18 +413,30 @@ class HarmonyAnalysis:
         return f"조성: {self.key.name} [확실도 {self.key.confidence}]{alt}\n코드: " + " · ".join(bars)
 
 
+POLY = 0.1  # 같이 시작하는 음이 이 비율보다 많으면 화음 트랙
+TOGETHER = 0.05  # 박. 이 안에서 시작하면 같이 누른 것 (손으로 친 화음의 어긋남)
+
+
+def is_line(track: Track) -> bool:
+    """한 줄로 움직이는 트랙 — 멜로디 · 베이스 · 아르페지오. 화음 트랙은 여러 음을 같은 순간에 누른다.
+    처음엔 음이 겹치는 비율로 봤는데, 꾸밈음 · 레가토로 음이 살짝씩 겹치는 멜로디(Cymatics Sphinx)가 화음 트랙이 돼
+    코드를 붙이지 않고 멜로디 음으로 코드 이름을 지었고(E/G), 반주가 멜로디를 피하지 못하고 같은 높이에 깔렸다 → 같이 시작하는 음의 비율로."""
+    starts = sorted(n.start for n in track.notes)
+    if len(starts) < 2:
+        return True
+    together = sum(1 for a, b in zip(starts, starts[1:]) if b - a < TOGETHER)
+    return together / (len(starts) - 1) < POLY
+
+
 def _is_melody(track: Track, lowest: str | None) -> bool:
     """한 줄로만 움직이는(겹치는 음이 거의 없는) 트랙 중 가장 낮은 트랙(베이스)이 아니고, 순차로 움직이는 것.
 
     펼침화음(아르페지오)도 한 줄이지만 3 · 4도로 뛰며 같은 리듬(8분음표만 …)을 되풀이한다 → 화음으로 본다.
     멜로디는 대부분 2도(반음 · 온음)로 움직이고, 코드음을 따라 뛰는 멜로디도 음 길이가 들쭉날쭉하다.
     """
-    if track.id == lowest or len(track.notes) < 2:
+    if track.id == lowest or len(track.notes) < 2 or not is_line(track):
         return False
     notes = sorted(track.notes, key=lambda n: n.start)
-    overlaps = sum(1 for a, b in zip(notes, notes[1:]) if b.start < a.start + a.duration - 1e-3)
-    if overlaps / (len(notes) - 1) >= 0.1:
-        return False
     moves = [abs(b.pitch - a.pitch) for a, b in zip(notes, notes[1:]) if b.pitch != a.pitch]
     if not moves or sum(1 for m in moves if m <= 2) / len(moves) >= STEPWISE:
         return True

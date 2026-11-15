@@ -65,3 +65,35 @@ def test_short_rest_keeps_chord_long_rest_is_no_chord():
 def test_songs_with_harmony_are_read_not_harmonized():
     pad = line(*[(p, b * 4.0, 4.0) for b, ch in enumerate([(60, 64, 67), (57, 60, 64)]) for p in ch], name="Pad", program=89)
     assert [c.name for c in song_chords(song(pad)).chords] == ["C", "Am"]
+
+
+# 4마디 G 단조 리프를 5~8마디에서 옥타브만 내려 되풀이하는 곡 (Cymatics Sphinx와 같은 꼴, 음은 직접 만든 것)
+G, Ab, Bb, D, Eb, F = 67, 68, 70, 74, 75, 65
+RIFF = [[G, G, D, Eb, Ab, Bb, G, Ab], [G, F, G, Ab, G, Bb, D, G], [G, Ab, G, G, Bb, Ab, G, G], [G, F, G, Ab, G, Ab, G, G]]
+
+
+def riff_song(legato: bool = False) -> Project:
+    """8분음표 리프. legato면 음마다 다음 음과 살짝 겹치게."""
+    notes = [Note(pitch=p - 12 * half, start=(half * 4 + b) * 4 + i * 0.5, duration=0.6 if legato else 0.5, velocity=90)
+             for half in (0, 1) for b, bar in enumerate(RIFF) for i, p in enumerate(bar)]
+    return song(Track(id="t1", name="Lead", notes=notes))
+
+
+def test_repeated_phrase_gets_same_chords():
+    """옥타브만 바꿔 되풀이하는 4마디에는 같은 코드. 예전엔 이어짐 점수 때문에 Gm Gm Gm Eb / Cm Gm Eb Gm처럼 다르게 붙었다."""
+    from app.harmony.harmonize import repeats
+
+    p = riff_song()
+    assert repeats(p.tracks[0].notes, 4, 8) == [(4, [0, 4])]
+    chords = harmonize(p).chords
+    per_bar = [next(c.name for c in chords if c.start <= b * 4 < c.end) for b in range(8)]
+    assert per_bar[:4] == per_bar[4:]
+
+
+def test_legato_melody_counts_as_melody():
+    """살짝씩 겹치는 레가토 멜로디도 멜로디 — 예전엔 겹침 비율로 화음 트랙처럼 봐서 반주가 멜로디를 피하지 못했다."""
+    from app.harmony.analyze import melody_ids
+
+    p = riff_song(legato=True)
+    bass = Track(id="t2", name="Bass", program=33, notes=[Note(pitch=43, start=b * 4.0, duration=4.0, velocity=90) for b in range(8)])
+    assert melody_ids(p.model_copy(update={"tracks": [*p.tracks, bass]})) == {"t1"}

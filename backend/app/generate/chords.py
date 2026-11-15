@@ -2,13 +2,16 @@
 
 코드는 v0.2 분석 엔진이 읽은 곡의 코드, 또는 사용자가 말한 진행("C – Am – F – G")을 따라간다.
 음 고르기는 무늬와 상관없이 같다 (아래). 무늬는 고른 4음을 어떤 리듬으로 치느냐만 다르다.
-- 음역: 베이스 위쪽과 멜로디 아래쪽 사이 빈 곳 — 다른 악기와 같은 높이에서 겹치지 않게
+- 음역: 베이스 위쪽과 멜로디 아래쪽 사이 빈 곳 — 다른 악기와 같은 높이에서 겹치지 않게. 4마디 묶음마다 따로 정하고,
+  멜로디가 낮아 아래가 탁한 높이뿐이면 멜로디 위로
 - 보이싱: 4음. 첫 코드는 음역 가운데, 다음 코드부터는 앞 코드에서 가장 덜 움직이게 (패드가 코드마다 뛰지 않게).
   그동안 같이 울리는 멜로디 · 다른 트랙 음과 반음(단2 · 단9)으로 부딪히는 음은 피하고, 3음이라도 많이 부딪히면 뺀다
 - 소리: 곡 편성에 맞춰 — 스트링 · 관악기가 있으면 스트링 앙상블, 신스 리드 · 신스 베이스 · 일렉트로닉 킷이 있으면
   폴리신스 패드, 그 밖(건반 · 로파이 · 피아노)은 따뜻한 패드. 이미 같은 소리가 있으면 다른 패드.
   템포로는 고르지 않는다 (150 BPM 피아노 왈츠에 신스 패드가 깔렸다)
-- 세기: 원래 곡보다 조금 작게 (뒤에 깔리게)
+- 장르(style)를 말하면: 끊어 치기는 그 장르의 두 마디 리듬(소울 당겨 치기 · 펑크 16분 …), 소울 · 재즈 · 로파이 · 붐뱁 · 펑크는
+  7 · 9음을 더한다 (멜로디와 반음으로 부딪히면 덜어 냄). 사용자가 말한 진행은 말한 그대로
+- 세기: 원래 곡보다 조금 작게 (뒤에 깔리게). 끊어 치기는 자리마다 조금씩 흔든다
 - 다른 버전: version마다 첫 코드를 다른 모양(촘촘하게 · 넓게 · 높게 · 4도로 벌려)으로 짜고, 거기서부터 이어 간다
 """
 
@@ -25,7 +28,7 @@ from app.generate.check import playable
 from app.harmony import ChordSpan
 from app.harmony.harmonize import song_chords
 from app.harmony.analyze import melody_ids
-from app.harmony.reharm import INTERVALS
+from app.harmony.reharm import INTERVALS, TENSION
 from app.harmony.voicing import revoice
 from app.models.project import Note, Project, Track
 from app.tools.instrument import heard_program
@@ -35,6 +38,8 @@ LOW, HIGH = 45, 79  # 패드가 머무를 바깥 한계 (A2 ~ G5)
 GAP = 2  # 반음. 베이스 · 멜로디와 이만큼은 떨어진다
 NARROW = 10  # 반음. 빈 곳이 이보다 좁으면 멜로디 아래쪽에 붙여 놓는다
 BASS_BELOW = 48  # 음 높이 가운데값이 이보다 낮은 화음 트랙은 베이스로 본다 (C3)
+CLEAR = 50  # D3. 화음을 이보다 낮게 촘촘히 쌓으면 탁하다 — 멜로디 아래 빈 곳이 여기서부터 NARROW보다 좁으면 멜로디 위로
+UP = 12  # 반음. 멜로디 위로 올릴 때 음역 폭
 DRIFT = 5  # 반음. 보이싱 가운데가 음역 가운데에서 이만큼 넘게 끌려가면 다시 가운데에서 짠다
 SOFTER = 0.75  # 원래 곡 세기에 곱한다
 CLUSTER = 6  # 반음 붙은 두 음의 벌점 (움직임 반음 수로)
@@ -100,7 +105,15 @@ def pad_window(project: Project, start: float, end: float) -> tuple[int, int]:
                 low = max(low, _percentile(pitches, 0.9) + GAP)
     tune = [p for t in pitched if t.id in melody for p in heard(t)]
     if tune:
-        high = min(high, _percentile(tune, 0.1) - GAP)
+        below = _percentile(tune, 0.1) - GAP
+        above = max(tune) + GAP  # 위로 올릴 땐 가장 높은 음 위로 (짧게 찍는 꼭대기 음 D4 · Eb4와도 겹쳤다)
+        # 멜로디가 낮아 그 아래로는 탁한 높이밖에 안 남으면 멜로디 위로 (Sphinx 후반 4마디: 멜로디 F3~Eb4 아래에 깔 자리가 없어
+        # 반주가 멜로디와 같은 G3~G4에 깔렸다)
+        if below - max(low, CLEAR) < NARROW and above + NARROW <= HIGH:
+            return above, min(HIGH, above + UP)
+        high = min(high, below)
+        if basses and high - CLEAR >= NARROW:  # 베이스가 낮은 곳을 받치면 화음은 탁하지 않은 높이부터
+            low = max(low, CLEAR)
     if high - low < NARROW:  # 좁으면 멜로디 바로 아래 한 옥타브 (멜로디를 가리지 않게, 베이스와는 조금 겹쳐도)
         high = max(LOW + 12, min(HIGH, high))
         low = high - 12
@@ -108,15 +121,16 @@ def pad_window(project: Project, start: float, end: float) -> tuple[int, int]:
 
 
 def _must(chord: ChordSpan) -> set[int]:
-    """꼭 넣을 음: 코드 색을 정하는 3음 · 7음(6음) · 변한 5음. 7음이 없는 3화음이면 세 음 모두."""
+    """꼭 넣을 음: 코드 색을 정하는 3음 · 7음(6음) · 9음 · 변한 5음. 7음이 없는 3화음이면 세 음 모두."""
     ivs = INTERVALS.get(chord.quality, (0, 4, 7))
-    color = {i for i in ivs if i in (3, 4, 6, 8, 9, 10, 11)}
+    color = {i for i in ivs if i in (2, 3, 4, 6, 8, 9, 10, 11)}  # 9음(2)도 — Cm9라고 해 놓고 9음 없이 Eb를 겹쳐 쌓았다
     picked = color if any(i in (9, 10, 11) for i in ivs) else set(ivs)
     return {(chord.root + i) % 12 for i in picked}
 
 
 def heard_with(project: Project, chords: list[ChordSpan], start: float, end: float) -> list[dict[int, float]]:
-    """코드마다 그동안 같이 울리는 다른 트랙(드럼 말고) 음: {음 높이: 겹친 박}. OVERLAP보다 짧게 겹친 음은 뺀다."""
+    """코드마다 그동안 같이 울리는 다른 트랙(드럼 말고) 음: {음 높이: 겹친 박}. 같은 높이를 다 합쳐 OVERLAP보다 짧으면 뺀다
+    (지나가는 음). 음 하나씩 따지면 0.1~0.25박짜리 Ab을 마디마다 여러 번 찍는 멜로디(Sphinx)와 G가 계속 부딪혀도 몰랐다."""
     notes = sorted((n for t in project.tracks if not t.is_drum for n in t.notes), key=lambda n: n.start)
     out = []
     for c in chords:
@@ -126,9 +140,9 @@ def heard_with(project: Project, chords: list[ChordSpan], start: float, end: flo
             if n.start >= e:
                 break
             ov = min(e, n.start + n.duration) - max(s, n.start)
-            if ov >= OVERLAP:
+            if ov > 0:
                 heard[n.pitch] = heard.get(n.pitch, 0.0) + ov
-        out.append(heard)
+        out.append({m: beats for m, beats in heard.items() if beats >= OVERLAP})
     return out
 
 
@@ -184,16 +198,18 @@ def shape(version: int) -> list[int]:
     return [x + rng.choice((-2, -1, 1, 2)) for x in base]
 
 
-def voicings(chords: list[ChordSpan], low: int, high: int, center: int, version: int = 1,
+def voicings(chords: list[ChordSpan], windows: list[tuple[int, int]], version: int = 1,
              heard: list[dict[int, float]] | None = None) -> list[list[int]]:
-    """코드마다 4음. 앞 코드에서 가장 덜 움직이게 잇고, 가운데에서 너무 멀어지면 다시 가운데에서. 음역 [low, high] 안.
+    """코드마다 4음. 앞 코드에서 가장 덜 움직이게 잇고, 가운데에서 너무 멀어지면 다시 가운데에서. 코드마다 음역 windows 안
+    (음역이 바뀌면 — 멜로디가 옥타브를 바꾼 묶음 — 새 음역 가운데에서 다시 짠다).
     heard(코드마다 같이 울리는 다른 트랙 음, heard_with)가 있으면 그 음들과 반음으로 부딪히지 않게 고른다."""
-    seed = [center + x for x in shape(version)]
     out: list[list[int]] = []
-    prev: list[int] = seed
-    for i, c in enumerate(chords):
+    prev: list[int] = []
+    for i, (c, (low, high)) in enumerate(zip(chords, windows)):
+        center = (low + high) // 2
+        seed = [center + x for x in shape(version)]
         h = heard[i] if heard else None
-        v = lead(prev, c, low, high, h)
+        v = lead(prev if prev and windows[i - 1] == (low, high) else seed, c, low, high, h)
         if abs(mean(v) - center) > DRIFT:
             v = lead(seed, c, low, high, h)
         out.append(v)
@@ -212,6 +228,34 @@ ARP_STYLES = [("up", 0.5), ("updown", 0.5), ("up", 0.25), ("updown", 0.25)]  # �
 # 결과 요약에 적을 리듬 (LLM이 짐작해 말하지 않게)
 STAB_NAMES = ["박마다", "뒷박", "당겨서", "3-3-2"]
 ARP_NAMES = ["8분음표 올라가기", "8분음표 오르내리기", "16분음표 올라가기", "16분음표 오르내리기"]
+# 장르별 반주 리듬: 두 마디(4/4 여덟 박) 안의 (시작 박, 길이). 장르를 말하면 위 리듬 대신 (버전마다 다음 것).
+# "소울 느낌으로 피아노 반주"에 박마다 8분음표로 뚝뚝 끊어 쳐서 "절대 소울 느낌이 아닌데"를 들었다 (2026-11-15).
+# 다음 코드 바로 앞(반 박 안)에서 시작해 코드가 바뀌는 자리를 넘어 끄는 음은 다음 코드를 미리 친다 (당겨 치기)
+GENRE_COMP: dict[str, list[tuple[tuple[float, float], ...]]] = {
+    "soul": [((0, 1.5), (1.5, 0.5), (2.5, 1.0), (4, 1.0), (5.5, 1.0), (7.5, 1.5)),
+             ((0, 0.75), (0.75, 0.75), (2, 0.5), (2.5, 1.5), (4, 1.5), (5.5, 0.5), (6.5, 1.0), (7.5, 1.0))],
+    "jazz": [((0, 1.0), (1.5, 0.5), (4.5, 0.5), (6, 1.0), (7.5, 1.0))],  # 찰스턴 · 당겨 치기
+    "funk": [((0, 0.25), (0.75, 0.25), (1.5, 0.5), (2.5, 0.25), (3.25, 0.25), (3.75, 0.25),
+              (4, 0.25), (4.75, 0.25), (5.5, 0.25), (6.5, 0.5), (7.25, 0.25))],  # 16분음표로 짧게
+    "lofi": [((0, 2.5), (2.5, 1.5), (4, 3.5), (7.5, 1.0))],  # 길게 늘어지게
+    "boombap": [((0, 1.5), (1.5, 2.0), (4, 2.5), (6.5, 1.5))],
+    "pop": [((0, 1.5), (1.5, 1.0), (2.5, 1.5), (4, 1.5), (5.5, 1.0), (6.5, 1.5))],
+    "rock": [tuple((i * 0.5, 0.5) for i in range(16))],  # 8분음표로 고르게
+    "house": [tuple((i + 0.5, 0.5) for i in range(8))],  # 뒷박
+    "trap": [((0, 2.0), (2.5, 1.5), (4, 4.0))],
+    "latin": [((0, 0.5), (1.5, 0.5), (3, 0.5), (5, 0.5), (6, 0.5), (7.5, 1.0))],  # 클라베 자리
+}
+GENRE_COMP_NAMES = {
+    "soul": "소울 당겨 치기", "jazz": "재즈 컴핑(찰스턴)", "funk": "펑크 16분 끊어 치기", "lofi": "로파이 길게 늘어지게",
+    "boombap": "붐뱁 길게", "pop": "팝 3-3-2", "rock": "록 8분음표", "house": "하우스 뒷박", "trap": "트랩 길게", "latin": "라틴 클라베",
+}
+PUSH = 0.5  # 박. 코드가 바뀌기 이만큼 안쪽에서 시작해 넘어가는 음 = 다음 코드를 당겨 친 것
+# 7 · 9음을 넣는 장르. 음계 화음마다 넣을 텐션(reharm.TENSION)부터, 멜로디와 반음으로 부딪히면 한 단계씩 덜어 낸다
+COLORFUL = {"soul", "jazz", "lofi", "boombap", "funk"}
+LIGHTER = {"maj9": ["maj9", "maj7", "add9", "6"], "m9": ["m9", "m7", "madd9"], "9": ["9", "7"], "7": ["7"], "m7": ["m7"],
+           "m7b5": ["m7b5"]}
+HUMAN = 4  # 끊어 치기 세기를 치는 자리마다 ±이만큼 흔든다 (기계처럼 같은 세기로 들리지 않게)
+PUSH_ACCENT = 4  # 당겨 친 음은 조금 세게
 ACCENT = 8  # 끊어 치기에서 마디 첫 박을 이만큼 세게
 STAB_SOFTER = 0.85  # 끊어 치기는 패드보다 덜 줄인다 (짧게 치는 소리라 묻힌다)
 
@@ -359,18 +403,49 @@ def song_end(project: Project) -> float:
 # ---------- 무늬 ----------
 
 def _stab(chords: list[ChordSpan], voiced: list[list[int]], start: float, end: float, bpb: float, version: int,
-          velocity: int) -> list[Note]:
-    """마디마다 같은 리듬으로 화음을 끊어 친다. 리듬 자리가 없는 짧은 코드(반 마디 · 뒷박 리듬)도 첫 박에 한 번은 친다."""
-    rhythm = [(o, d) for o, d in STAB_RHYTHMS[(version - 1) % len(STAB_RHYTHMS)] if o < bpb - 1e-6]
-    hits = [(b * bpb + o, d) for b in range(int(start // bpb), math.ceil(end / bpb)) for o, d in rhythm]
-    notes = []
-    for c, v in zip(chords, voiced):
-        s, e = max(c.start, start), min(c.end, end)
-        mine = [(h, d) for h, d in hits if s - 1e-6 <= h < e - 1e-6] or [(s, min(1.0, e - s))]
-        for h, d in mine:
-            vel = min(127, velocity + (ACCENT if abs(h % bpb) < 1e-6 else 0))
-            notes += [Note(pitch=p, start=round(h, 4), duration=round(min(d, e - h), 4), velocity=vel) for p in v]
-    return notes
+          velocity: int, style: str | None = None) -> tuple[list[Note], list[ChordSpan]]:
+    """리듬으로 화음을 끊어 친다. 장르가 있으면(4/4) 그 장르의 두 마디 리듬, 없으면 마디마다 같은 리듬(STAB_RHYTHMS).
+    코드가 바뀌기 바로 앞에서 시작해 넘어가는 음은 다음 코드를 당겨 치고, 그 코드의 첫 박은 이어 끄니 다시 치지 않는다.
+    리듬 자리가 없는 짧은 코드(반 마디 · 뒷박 리듬)도 첫 박에 한 번은 친다. 같은 높이가 겹치지 않게 다음 칠 때까지만 끈다.
+    (음, 검사용 코드 — 당겨 친 자리부터 다음 코드로 본다)."""
+    patterns = GENRE_COMP.get(style or "") if abs(bpb - 4) < 1e-6 else None
+    if patterns:
+        rhythm, cycle = patterns[(version - 1) % len(patterns)], 2 * bpb
+    else:
+        rhythm, cycle = tuple((o, d) for o, d in STAB_RHYTHMS[(version - 1) % len(STAB_RHYTHMS)] if o < bpb - 1e-6), bpb
+    grid = sorted(k * cycle + o for k in range(int(start // cycle), math.ceil(end / cycle)) for o, _ in rhythm)
+    lengths = {round(k * cycle + o, 4): d for k in range(int(start // cycle), math.ceil(end / cycle)) for o, d in rhythm}
+    hits: list[tuple[float, int, bool]] = []  # (시작, 코드 번호, 당겨 침)
+    pushed: set[int] = set()
+    for h in grid:
+        if not start - 1e-6 <= h < end - 1e-6:
+            continue
+        i = next((k for k, c in enumerate(chords) if c.start - 1e-6 <= h < c.end - 1e-6), None)
+        if i is None:
+            continue
+        nxt = i + 1 if i + 1 < len(chords) and abs(chords[i + 1].start - chords[i].end) < 1e-6 else None
+        if (nxt is not None and chords[i].end - h <= PUSH + 1e-6 and h + lengths[round(h, 4)] > chords[i].end + 1e-6
+                and chords[i].end < end - 1e-6):
+            hits.append((h, nxt, True))
+            pushed.add(nxt)
+        elif not (i in pushed and abs(h - chords[i].start) < 1e-6):
+            hits.append((h, i, False))
+    for k, c in enumerate(chords):  # 리듬 자리가 하나도 없는 코드
+        if k not in pushed and not any(i == k for _, i, _ in hits) and c.start < end - 1e-6 and c.end > start + 1e-6:
+            hits.append((max(c.start, start), k, False))
+    hits.sort()
+    rng = Random(version)
+    notes: list[Note] = []
+    spans = [replace(c) for c in chords]
+    for n, (h, i, push) in enumerate(hits):
+        stop = min(chords[i].end, end, hits[n + 1][0] if n + 1 < len(hits) else end)
+        length = min(lengths.get(round(h, 4), 1.0), stop - h)
+        if push:
+            spans[i - 1].end, spans[i].start = h, h
+        vel = velocity + (ACCENT if abs(h % bpb) < 1e-6 else 0) + (PUSH_ACCENT if push else 0) + rng.randint(-HUMAN, HUMAN)
+        vel = max(1, min(127, vel))
+        notes += [Note(pitch=p, start=round(h, 4), duration=round(length, 4), velocity=vel) for p in voiced[i]]
+    return notes, spans
 
 
 def _arpeggio(chords: list[ChordSpan], voiced: list[list[int]], start: float, end: float, version: int,
@@ -395,10 +470,57 @@ def _with_root(voicing: list[int], chord: ChordSpan, floor: int) -> list[int]:
     return [root, *voicing] if root >= floor else voicing
 
 
+def _bounds(window: tuple[int, int], height: str | None, floor: int, ceil: int) -> tuple[int, int]:
+    """음역에 높이 말(low · high)을 더하고, 고른 악기로 낼 수 있는 높이 안으로 (보이싱이 GAP만큼 넘칠 수 있어 그만큼 안쪽)."""
+    shift = HEIGHT_SHIFT.get(height or "mid", 0)
+    low, high = max(LOW - 7, window[0] + shift), min(HIGH + 7, window[1] + shift)
+    low, high = max(low, floor + GAP), min(high, ceil - GAP)
+    if high - low < 12:
+        low, high = max(floor + GAP, min(low, ceil - GAP - 12)), min(ceil - GAP, max(high, floor + GAP + 12))
+    return low, high
+
+
+def _windows(project: Project, chords: list[ChordSpan], start: float, end: float, height: str | None,
+             floor: int, ceil: int) -> tuple[list[ChordSpan], list[tuple[int, int]]]:
+    """코드마다 음역. PHRASE마디 묶음마다 그 안의 멜로디로 정한다 — 곡 전체로 한 번만 정하면 멜로디가 옥타브를 내려
+    되풀이하는 곡에서 낮은 쪽에 맞춰져 높은 쪽 멜로디와 겹쳤다. 묶음에 멜로디가 없으면 곡 전체로.
+    묶음 경계를 넘는 코드는 음역이 바뀌면 경계에서 나눈다 (4~5마디에 걸친 Gm이 4마디 음역 그대로 낮은 멜로디와 겹쳤다).
+    (나눈 코드들, 코드마다 음역)."""
+    whole = pad_window(project, start, end)
+    melody = melody_ids(project)
+    span = PHRASE * project.beats_per_bar
+    cache: dict[int, tuple[int, int]] = {}
+
+    def window(k: int) -> tuple[int, int]:
+        if k not in cache:
+            s, e = max(start, k * span), min(end, (k + 1) * span)
+            sings = any(n.start < e and n.start + n.duration > s for t in project.tracks if t.id in melody for n in t.notes)
+            cache[k] = _bounds(pad_window(project, s, e) if sings else whole, height, floor, ceil)
+        return cache[k]
+
+    out_chords, out = [], []
+    for c in chords:
+        piece, e = c, min(c.end, end)
+        while True:
+            k = int((max(piece.start, start) + 1e-6) // span)
+            last = k
+            while (last + 1) * span < e - 1e-6 and window(last + 1) == window(k):
+                last += 1
+            cut = (last + 1) * span
+            if cut >= e - 1e-6:
+                out_chords.append(piece)
+                out.append(window(k))
+                break
+            out_chords.append(replace(piece, end=cut))  # 다음 묶음에서 음역이 바뀐다 — 나머지는 새 음역으로
+            out.append(window(k))
+            piece = replace(piece, start=cut)
+    return out_chords, out
+
+
 def chord_notes(
     project: Project, start: float = 0.0, end: float | None = None, height: str | None = None,
     program: int | None = None, version: int = 1, pattern: str = "pad", progression: list[str] | None = None,
-    bars_per_chord: float = 1.0,
+    bars_per_chord: float = 1.0, style: str | None = None,
 ) -> tuple[list[Note], PadPlan]:
     """[start, end) 박에 코드대로 화음 음. 코드는 progression(직접 말한 진행)이 있으면 그것을 곡 길이만큼 되풀이하고
     (곡이 진행 한 바퀴보다 짧으면 한 바퀴), 없으면 곡의 코드(분석) — 코드가 없는 구간(N.C.)은 비운다.
@@ -409,22 +531,20 @@ def chord_notes(
     chords, end, filled = follow(project, start, end, progression, bars_per_chord)
     if not chords:
         return [], PadPlan(program, 0, 0)
-    low, high = pad_window(project, start, end)
-    shift = HEIGHT_SHIFT.get(height or "mid", 0)
-    low, high = max(LOW - 7, low + shift), min(HIGH + 7, high + shift)
-    floor, ceil = playable(program)  # 고른 악기로 낼 수 있는 높이 안에서만 (보이싱이 GAP만큼 넘칠 수 있어 그만큼 안쪽)
-    low, high = max(low, floor + GAP), min(high, ceil - GAP)
-    if high - low < 12:
-        low, high = max(floor + GAP, min(low, ceil - GAP - 12)), min(ceil - GAP, max(high, floor + GAP + 12))
-    center = (low + high) // 2
+    # 장르 색(7 · 9음)은 곡에서 읽거나 붙인 코드에만 — 사용자가 말한 진행은 말한 그대로
+    chords, colors = _colored(project, chords, start, end) if style in COLORFUL and not progression else (chords, "")
+    floor, ceil = playable(program)
+    chords, windows = _windows(project, chords, start, end, height, floor, ceil)
     played = [n.velocity for t in project.tracks if not t.is_drum for n in t.notes]
-    softer = STAB_SOFTER if pattern == "stab" else SOFTER
+    # 장르 리듬은 길게 끄는 음이 많아 패드만큼 줄인다 (짧게 끊어 치는 기본 리듬만 덜 줄임)
+    softer = STAB_SOFTER if pattern == "stab" and style not in GENRE_COMP else SOFTER
     velocity = max(35, min(90, round(median(played) * softer))) if played else 64
-    voiced = voicings(chords, low, high, center, version, heard_with(project, chords, start, end))
+    voiced = voicings(chords, windows, version, heard_with(project, chords, start, end))
     if not any(n.start < end and n.start + n.duration > start for t in project.tracks if not t.is_drum for n in t.notes):
         voiced = [_with_root(v, c, floor) for c, v in zip(chords, voiced)]
+    chords, eased = _eased(chords, voiced)
     if pattern == "stab":
-        notes = _stab(chords, voiced, start, end, bpb, version, velocity)
+        notes, chords = _stab(chords, voiced, start, end, bpb, version, velocity, style)
     elif pattern == "arpeggio":
         notes = _arpeggio(chords, voiced, start, end, version, velocity)
     else:
@@ -434,9 +554,42 @@ def chord_notes(
             notes += [Note(pitch=p, start=round(s, 4), duration=round(e - s, 4), velocity=velocity) for p in voicing]
     pitches = [n.pitch for n in notes]
     names = {"stab": STAB_NAMES, "arpeggio": ARP_NAMES}.get(pattern)
-    chords, eased = _eased(chords, voiced)
-    feel = " · ".join(x for x in (names[(version - 1) % len(names)] if names else "", eased, filled) if x)
+    rhythm = names[(version - 1) % len(names)] if names else ""
+    if pattern == "stab" and style in GENRE_COMP and abs(bpb - 4) < 1e-6:
+        rhythm = GENRE_COMP_NAMES[style]
+    feel = " · ".join(x for x in (rhythm, colors, eased, filled) if x)
     return notes, PadPlan(program, min(pitches), max(pitches), chords, feel)
+
+
+def _colored(project: Project, chords: list[ChordSpan], start: float, end: float) -> tuple[list[ChordSpan], str]:
+    """음계 화음(3화음)에 7 · 9음을 더한다 (소울 · 재즈 · 로파이처럼 COLORFUL 장르). 더한 음이 그동안 울리는 다른 트랙 음과
+    반음(위아래 어느 쪽이든)으로 OVERLAP박 넘게 같이 울리면 한 단계 덜어 낸다 (Gm9 → Gm7). 짧은 음도 합쳐 센다 — Sphinx는
+    0.1~0.25박짜리 Ab을 마디마다 여러 번 찍어, 하나씩 보면 지나가는 음이지만 Gm9의 A와 계속 부딪힌다. (코드들, 결과에 적을 말)."""
+    key = song_chords(project).key
+    notes = [n for t in project.tracks if not t.is_drum for n in t.notes]
+    out, names = [], []
+    for c in chords:
+        rich = TENSION[key.mode].get((c.root - key.tonic) % 12) if c.root is not None and c.quality in ("", "m") else None
+        if rich is None or (rich.startswith("m") and not rich.startswith("maj")) != (c.quality == "m"):
+            out.append(c)
+            continue
+        s, e = max(c.start, start), min(c.end, end)
+        heard: dict[int, float] = {}
+        for n in notes:
+            ov = min(e, n.start + n.duration) - max(s, n.start)
+            if ov > 0:
+                heard[n.pitch % 12] = heard.get(n.pitch % 12, 0.0) + ov
+        base = {(c.root + i) % 12 for i in INTERVALS[c.quality]}
+        for q in LIGHTER.get(rich, [rich]):
+            added = {(c.root + i) % 12 for i in INTERVALS[q]} - base
+            if all(heard.get((pc + 1) % 12, 0.0) < OVERLAP and heard.get((pc - 1) % 12, 0.0) < OVERLAP for pc in added):
+                head, *slash = c.name.split("/")
+                head = head[: len(head) - len(c.quality)] if c.quality else head
+                c = replace(c, quality=q, name="/".join([head + q, *slash]))
+                names.append(c.name)
+                break
+        out.append(c)
+    return out, ("7 · 9음 " + " · ".join(dict.fromkeys(names))) if names else ""
 
 
 def _eased(chords: list[ChordSpan], voiced: list[list[int]]) -> tuple[list[ChordSpan], str]:

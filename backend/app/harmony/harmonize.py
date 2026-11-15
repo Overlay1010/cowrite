@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from app.harmony.analyze import ChordSpan, HarmonyAnalysis, KeyInfo, analyze, label, spell
+from app.harmony.analyze import ChordSpan, HarmonyAnalysis, KeyInfo, analyze, is_line, label, spell
 from app.models.project import Note, Project, Track
 
 # 후보 화음: 으뜸음에서의 거리 → 종류 ("" 장 · "m" 단)
@@ -57,6 +57,11 @@ STAY_BAR = 0.0  # 마디선에서 같은 코드 그대로 (민요는 0.3이 더 
 CHANGE_MID = 1.0  # 마디 가운데서 코드를 바꾸는 벌점
 START_TONIC = 0.5  # 첫 코드가 으뜸화음
 FLAT_V = 0.3  # 단조의 v(단화음) 벌점 — 이끎음이 없으면 v도 맞지만, 끝맺음엔 V가 흔하다
+# 되풀이하는 멜로디에는 같은 코드: 앞에서 나온 L마디(8 · 4 · 2)와 마디마다 음(박 자리 · 음 이름)이 SAME만큼 같으면 같은 멜로디.
+# Sphinx는 1~4마디를 5~8마디에서 옥타브만 내려 되풀이하는데, 이어짐 점수 때문에 Gm Eb Cm Gm / Eb Cm Gm Gm으로 밀려 붙었다.
+# 한 마디짜리 리프는 묶지 않는다 (같은 리프 위로 코드가 바뀌는 루프가 흔하다)
+REPEAT_BARS = (8, 4, 2)
+SAME = 0.6
 
 # 멜로디 음 한 박의 점수 (코드 근음에서의 거리)
 FIT_ROOT, FIT_THIRD, FIT_FIFTH = 1.0, 1.0, 0.8
@@ -67,20 +72,7 @@ OUT_OF_KEY = -0.5
 # 박 안의 자리마다 무게: 반 마디 첫 박 · 박 · 엇박. 앞에서 이어 끄는 음은 HELD
 ON_UNIT, ON_BEAT, OFF_BEAT, HELD = 1.5, 1.0, 0.6, 0.8
 BASS_ROOT, BASS_TONE, BASS_OTHER = 1.0, 0.2, -0.6  # 한 줄짜리 베이스 음 (한 박마다)
-POLY = 0.1  # 같이 시작하는 음이 이 비율보다 많으면 화음 트랙
-TOGETHER = 0.05  # 박. 이 안에서 시작하면 같이 누른 것 (손으로 친 화음의 어긋남)
 BASS_BELOW = 48  # 음 높이 가운데값이 이보다 낮은 한 줄짜리 트랙은 베이스로 본다 (C3)
-
-
-def is_line(track: Track) -> bool:
-    """한 줄로 움직이는 트랙 — 멜로디 · 베이스 · 아르페지오. 화음 트랙은 여러 음을 같은 순간에 누른다.
-    처음엔 음이 겹치는 비율로 봤는데, 꾸밈음 · 레가토로 음이 살짝씩 겹치는 멜로디(Cymatics Sphinx)가 화음 트랙이 돼
-    코드를 붙이지 않고 예전처럼 멜로디 음으로 코드 이름을 지었다(E/G) → 같이 시작하는 음의 비율로."""
-    starts = sorted(n.start for n in track.notes)
-    if len(starts) < 2:
-        return True
-    together = sum(1 for a, b in zip(starts, starts[1:]) if b - a < TOGETHER)
-    return together / (len(starts) - 1) < POLY
 
 
 def needs_harmony(project: Project) -> bool:
@@ -209,6 +201,8 @@ def _harmonize_in(key: KeyInfo, tune: list[Note], low: list[Note], bpb: float) -
         path[i] = j
         j = back[i][j]
 
+    _tie_repeats(path, emissions, units, tune, bpb, move, tonic)
+
     # 한 마디보다 짧게 쉬는 곳(곡 중간)은 앞 코드를 이어 끈다 — 반 마디 쉼표마다 반주가 끊기지 않게.
     # 그보다 긴 빈 곳은 N.C.로 두고 반주 쪽(fill_rests)이 앞뒤 진행으로 채운다
     sounding = [em is not None for em in emissions]
@@ -242,6 +236,83 @@ def _harmonize_in(key: KeyInfo, tune: list[Note], low: list[Note], bpb: float) -
         else:
             spans.append(ChordSpan(s, e, root, root, spell(root, key) + quality, quality, "", "", 1.0))
     return total, spans
+
+
+def _marks(tune: list[Note], bpb: float, bars: int) -> list[frozenset[tuple[int, int]]]:
+    """마디마다 멜로디 음 (16분음표 자리, 음 이름) — 옥타브를 바꿔 되풀이해도 같게."""
+    out: list[set[tuple[int, int]]] = [set() for _ in range(bars)]
+    for n in tune:
+        b = int(n.start // bpb + 1e-9)
+        if 0 <= b < bars:
+            out[b].add((round((n.start - b * bpb) / 0.25), n.pitch % 12))
+    return [frozenset(m) for m in out]
+
+
+def _same(a: frozenset, b: frozenset) -> bool:
+    if not a or not b:
+        return not a and not b
+    return len(a & b) / len(a | b) >= SAME
+
+
+def repeats(tune: list[Note], bpb: float, bars: int) -> list[tuple[int, list[int]]]:
+    """되풀이하는 멜로디 묶음: [(마디 수, [처음 나온 마디, 되풀이한 마디, …])] (마디는 0부터, L마디 칸에 맞춘 자리만)."""
+    marks = _marks(tune, bpb, bars)
+    taken: set[int] = set()
+    groups: list[tuple[int, list[int]]] = []
+    for size in REPEAT_BARS:
+        mine: dict[int, list[int]] = {}  # 이 길이에서 처음 나온 마디 → 나온 자리들
+        for i in range(size, bars - size + 1, size):
+            if any(b in taken for b in range(i, i + size)) or not any(marks[i:i + size]):
+                continue
+            for first in range(0, i - size + 1, size):
+                if any(b in taken for b in range(first, first + size)) and first not in mine:
+                    continue
+                if all(_same(marks[i + k], marks[first + k]) for k in range(size)):
+                    mine.setdefault(first, [first]).append(i)
+                    taken.update(range(i, i + size))
+                    break
+        for first, starts in mine.items():
+            taken.update(range(first, first + size))
+            groups.append((size, starts))
+    return groups
+
+
+def _tie_repeats(path: list[int], emissions: list[list[float] | None], units: list[tuple[float, float]], tune: list[Note],
+                 bpb: float, move, tonic: list[float]) -> None:
+    """되풀이하는 멜로디 묶음마다 나온 자리들 중 한 곳의 코드를 모두에 쓴다 (path를 바꾼다). 어느 자리 코드로 할지는
+    모든 자리에 놓아 봤을 때 점수(멜로디 맞음 + 묶음 안 · 앞뒤와의 이어짐 + 곡 처음 · 끝 으뜸화음)의 합이 가장 큰 것."""
+    per_bar = round(bpb / (units[0][1] - units[0][0])) if units else 2
+    sounding = [i for i, em in enumerate(emissions) if em is not None]
+    if not sounding:
+        return
+    first_u, last_u = sounding[0], sounding[-1]
+    for size, starts in repeats(tune, bpb, math.ceil(len(units) / per_bar)):
+        spans = [range(b * per_bar, min(len(units), (b + size) * per_bar)) for b in starts]
+        n = min(len(r) for r in spans)
+        options = {tuple(path[u] for u in r[:n]) for r in spans}
+
+        def score(seq: tuple[int, ...]) -> float:
+            total = 0.0
+            for r in spans:
+                us = list(r[:n])
+                for k, u in enumerate(us):
+                    mid = abs(units[u][0] % bpb) > 1e-6
+                    if emissions[u] is not None:
+                        total += emissions[u][seq[k]]
+                    if k:
+                        total += move(seq[k - 1], seq[k], mid)
+                    elif u > 0:
+                        total += move(path[u - 1], seq[0], mid)
+                    if u == first_u or u == last_u:
+                        total += tonic[seq[k]]
+                if us[-1] + 1 < len(units):
+                    total += move(seq[-1], path[us[-1] + 1], False)
+            return total
+
+        best = max(sorted(options), key=score)
+        for r in spans:
+            for k, u in enumerate(list(r[:n])):
+                path[u] = best[k]
 
 
 def song_chords(project: Project) -> HarmonyAnalysis:

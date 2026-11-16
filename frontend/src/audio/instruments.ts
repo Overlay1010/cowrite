@@ -2,6 +2,7 @@ import * as Tone from 'tone'
 import type { AudioClip, Note, Track } from '../api/types'
 import { DRUM_DEFAULT, GM_NAMES, drumSample, gmProgramOf, kitOf } from './catalog'
 import { levelGain, noteSource } from './soundset'
+import { DRUM_DB } from './master'
 import { sampleBuffer, sampleMeta } from '../samples/library'
 import type { SampleMeta } from '../samples/analyze'
 
@@ -35,11 +36,12 @@ export function createVoice(track: Track, tempo = 120): Voice {
 }
 
 /**
- * 베이스 트랙은 6dB 키운다. 악기 크기는 음 하나 기준으로 맞췄는데(GM 베이스 7종 · 다른 악기 8종이 첫 1초 RMS · K-가중 모두 1dB 안),
+ * 베이스 트랙은 3dB 키운다. 악기 크기는 음 하나 기준으로 맞췄는데(GM 베이스 7종 · 다른 악기 8종이 첫 1초 RMS · K-가중 모두 1dB 안),
  * 곡에서는 베이스만 한 음씩 치고 패드 · 건반은 3~4음을 겹쳐 쳐서(4음이면 +6dB) 베이스가 묻혔다 — 낮은 음은 귀에도 작게 들린다.
- * GM 핑거 베이스 · 내 베이스 샘플 모두 "약하게 들린다"는 말로 찾았다. 마스터가 -4dB라 키워도 넘치지 않는다.
+ * GM 핑거 베이스 · 내 베이스 샘플 모두 "약하게 들린다"는 말로 찾아 6dB 키웠는데, 그때는 드럼이 18dB 넘게 커서 다 묻혔다.
+ * 드럼을 맞춘 뒤(master.ts) 재 보니 6dB면 베이스가 멜로디보다 6~8dB 커서 3dB로 줄였다 (멜로디 +0.5 ~ +3.5dB, 2026-11-17).
  */
-const BASS_GAIN = Math.pow(10, 6 / 20)
+const BASS_GAIN = Math.pow(10, 3 / 20)
 const isBassProgram = (program: number) => program >= 32 && program <= 39
 
 function gmVoice(track: Track): Voice {
@@ -465,7 +467,8 @@ const MY_TOM_RATES: Record<number, number> = { 41: 0.8, 43: 0.87, 45: 0.94, 47: 
 const MY_DRUM_CUT = 0.02 // 초. 같은 레인을 다시 쳐서 앞 소리를 끊을 때 딸깍 소리가 나지 않게 줄이는 시간
 
 class SampledDrumVoice implements Voice {
-  output = new Tone.Gain()
+  /** 드럼 전체 크기 (master.ts DRUM_DB — 악기와 맞춤) */
+  output = new Tone.Gain(Tone.dbToGain(DRUM_DB))
   /** 샘플이 모이는 곳. 킷 효과를 거쳐 output으로 간다 */
   private bus = new Tone.Gain()
   private fx: Tone.ToneAudioNode[] = []

@@ -2,6 +2,7 @@ import * as Tone from 'tone'
 import type { Project } from '../api/types'
 import { createVoice, playEvents, type Voice } from './instruments'
 import { useSamples } from '../samples/library'
+import { createMaster } from './master'
 
 // Project를 Tone.js Transport에 올려 재생한다.
 // 시간은 백엔드처럼 박 단위로 다루고, Transport의 틱(1박 = PPQ틱)으로 바꿔 예약한다.
@@ -52,7 +53,7 @@ function load(project: Project, muted: Record<string, boolean>) {
     c.volume.dispose()
   }
   channels = new Map()
-  master ??= new Tone.Volume(-4).toDestination()
+  master ??= createMaster()
 
   t.bpm.value = project.tempo
   t.timeSignature = [project.time_signature[0], project.time_signature[1]]

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from statistics import median
 
 from app.generate.check import SCALES
-from app.generate.chords import ELECTRONIC_KITS, OVERLAP, follow
+from app.generate.chords import ELECTRONIC_KITS, OVERLAP, follow, heard_velocity
 from app.harmony import ChordSpan
 from app.harmony.harmonize import song_chords
 from app.harmony.analyze import KeyInfo, decide_key
@@ -205,8 +205,8 @@ def bass_notes(
         bar_rhythm = [(o, d) for o, d in rhythm if o < bpb - 1e-6]
         hits = [(b * bpb + o, d) for b in bar_range for o, d in bar_rhythm]
 
-    played = [n.velocity for t in project.tracks if not t.is_drum for n in t.notes]
-    velocity = max(60, min(110, round(median(played)))) if played else 90
+    played = heard_velocity(project)
+    velocity = max(60, min(110, round(played))) if played else 90
     notes: list[Note] = []
     others = [n for t in project.tracks if not t.is_drum for n in t.notes]  # 위에서 울리는 음 (이어 주는 음이 부딪히지 않게)
     prev: int | None = None  # 워킹: 바로 앞 음

@@ -265,6 +265,30 @@ def test_density_picks_busier_or_sparser_performances():
     assert all(n.velocity >= 40 for n in sparse.notes)  # 고스트 노트를 뺀다
 
 
+def test_kick_and_snare_accents_meet_after_lane_scaling():
+    """전자 드럼으로 녹음한 루프는 드러머마다 패드 감도가 달라 킥이 스네어보다 한참 약하게 들어온다 (소울 루프 킥 10~54).
+    레인 무리마다 센 음을 맞추면 루프 대부분에서 킥 · 스네어의 센 음(상위 10%)이 거의 같다."""
+    from statistics import median
+
+    from app.generate.grooves import groove_notes, library
+
+    def top(v):
+        v = sorted(v)
+        return v[min(len(v) - 1, int(0.9 * len(v)))]
+
+    raw, scaled = [], []
+    for g in library():
+        kicks = [v for _, lane, v in g.hits if lane in (35, 36)]
+        snares = [v for _, lane, v in g.hits if lane in (37, 38, 40)]
+        if len(kicks) < 2 or len(snares) < 2:
+            continue
+        made, _ = groove_notes(g, 0, g.bars * 4, fills=False, density="mid", crash=CRASH, toms=TOMS)
+        raw.append(abs(top(kicks) - top(snares)))
+        scaled.append(abs(top([n.velocity for n in made if n.pitch in (35, 36)])
+                          - top([n.velocity for n in made if n.pitch in (37, 38, 40)])))
+    assert median(raw) > 30 and median(scaled) <= 5
+
+
 def test_jazz_prefers_a_swinging_performance():
     from app.generate.grooves import candidates
     assert candidates("jazz", 120, seed="p")[0].features["swing"] >= 56

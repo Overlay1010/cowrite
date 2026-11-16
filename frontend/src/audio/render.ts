@@ -2,6 +2,7 @@ import * as Tone from 'tone'
 import type { Project } from '../api/types'
 import { createVoice, playEvents } from './instruments'
 import { useSamples } from '../samples/library'
+import { createMaster } from './master'
 
 // 음원 내보내기: 재생과 같은 악기 · 볼륨 · 팬 · 효과로 곡을 오프라인(실시간보다 빠르게)으로 녹음한다.
 // 결과는 WAV. 다른 형식(MP3 등)은 이 WAV를 서버에서 ffmpeg로 바꾼다 (api/client.ts convertAudio).
@@ -24,7 +25,7 @@ export async function renderMix(project: Project, silenced: Record<string, boole
     transport.bpm.value = project.tempo
     transport.timeSignature = [project.time_signature[0], project.time_signature[1]]
     const ticks = (beats: number) => `${Math.round(beats * transport.PPQ)}i`
-    const master = new Tone.Volume(-4).toDestination()
+    const master = createMaster()
     const voices = tracks.map((track) => {
       const voice = createVoice(track, project.tempo)
       const panner = new Tone.Panner(Math.max(-1, Math.min(1, track.pan / 64))).connect(master)

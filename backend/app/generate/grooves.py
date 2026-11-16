@@ -26,6 +26,12 @@ LONG = {46: 1.0, 49: 1.0}  # 열린 햇 · 크래시는 길게 (다음 음이 �
 TIME_TARGET = {"low": 6.0, "mid": 9.0, "high": 15.0}  # 마디당 햇 · 라이드 수 (4분 · 8분 · 16분 쪽)
 SWING_TARGET = {"jazz": 64.0, "lofi": 58.0}  # 말이 없을 때 이 스타일은 흔들리는 연주부터
 TIE = 0.35  # 점수 차이가 이보다 작으면 같은 무리로 보고 곡마다 순서를 섞는다
+# 레인 무리마다 센 음(상위 10%)이 이 세기가 되게 (열린 햇 · 크래시 · 탐은 원래 세기) 루프 세기를 곱한다 — 전자 드럼으로 녹음한 데이터라 패드 감도가 드러머마다 달라,
+# 소울 루프 킥이 세기 10~54(스네어 103~117)로 들어와 재 보니 킥이 스네어보다 13dB 작았다 (2026-11-17). 무리 안의 셈여림은 비율대로 남는다
+LANE_GROUPS = {35: "kick", 36: "kick", 37: "snare", 38: "snare", 40: "snare", 39: "snare", 42: "hat", 44: "hat",
+               51: "ride", 53: "ride", 59: "ride"}
+ACCENT = {"kick": 110, "snare": 112, "hat": 96, "ride": 96}
+SCALE = (0.8, 2.5)  # 곱하는 비율의 한계
 
 
 @dataclass(frozen=True)
@@ -89,9 +95,23 @@ def _fills(lane: int, vel: int, step: int) -> bool:
     return lane in (43, 45, 47, 48, 50) or (lane in (37, 38) and vel >= 45 and step not in (4, 12))
 
 
+def lane_scales(groove: Groove) -> dict[str, float]:
+    """레인 무리 → 세기에 곱할 비율 (루프 + 필인에서 그 무리 센 음이 ACCENT가 되게, SCALE 안)."""
+    by: dict[str, list[int]] = {}
+    for _, lane, vel in groove.hits + (groove.fill or ()):
+        if lane in LANE_GROUPS:
+            by.setdefault(LANE_GROUPS[lane], []).append(vel)
+    out = {}
+    for group, vels in by.items():
+        top = sorted(vels)[min(len(vels) - 1, int(0.9 * len(vels)))]
+        out[group] = max(SCALE[0], min(SCALE[1], ACCENT[group] / max(1, top)))
+    return out
+
+
 def groove_notes(groove: Groove, start: float, end: float, *, fills: bool, density: str, crash: int, toms: tuple[int, ...],
                  phrase: int = 4) -> tuple[list[Note], int]:
-    """[start, end) 박에 루프를 마디째 잇는다 (4/4). (음, 넣은 필인 수)."""
+    """[start, end) 박에 루프를 마디째 잇는다 (4/4). (음, 넣은 필인 수). 세기는 레인 무리마다 맞춘다(lane_scales)."""
+    scales = lane_scales(groove)
     first_bar, last_bar = int(start // 4), math.ceil(end / 4 - 1e-9) - 1
     bars = last_bar - first_bar + 1
     fill_every = phrase if bars >= 2 * phrase else (bars if bars >= 2 else 0)
@@ -115,7 +135,8 @@ def groove_notes(groove: Groove, start: float, end: float, *, fills: bool, densi
                 hits = [h for h in hits if _step(h[0]) < start_step] + [h for h in groove.fill if _step(h[0]) >= start_step]
             else:  # 같은 연주에 필인이 없으면 마지막 박을 비우고 탐 넷
                 hits = [h for h in hits if round(h[0] * 4) < 12] + [(3 + i * 0.25, tom, 96) for i, tom in enumerate(toms)]
-        if density == "low":  # 고스트 노트와 16분 햇을 뺀다
+        hits = [(b, lane, max(1, min(127, round(vel * scales.get(LANE_GROUPS.get(lane, ""), 1.0))))) for b, lane, vel in hits]
+        if density == "low":  # 고스트 노트와 16분 햇을 뺀다 (맞춘 세기로 — 패드 감도로 작게 들어온 킥을 고스트로 보지 않게)
             hits = [h for h in hits if h[2] >= 40 and not (h[1] in (42, 44) and round(h[0] * 4) % 2 == 1)]
         if after_fill:
             hits = [h for h in hits if not (h[1] == crash and round(h[0] * 4) == 0)] + [(0.0, crash, 110)]

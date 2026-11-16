@@ -336,6 +336,40 @@ def test_soul_comp_pushes_into_next_chord_with_sevenths():
     assert check(made, plan.program, chords=plan.chords) == []
 
 
+def test_soul_comp_rings_until_the_next_hit():
+    """소울 반주는 페달을 밟은 것처럼 다음 칠 때까지 끈다 (적힌 길이대로 끊었더니 반 박 ~ 1박씩 비어 끊기는 소리였다).
+    펑크는 그대로 짧게 끊는다."""
+    from app.generate.chords import chord_notes
+
+    p = riff_with_bass()
+    for style, held in (("soul", True), ("funk", False)):
+        made, plan = chord_notes(p, pattern="stab", program=0, style=style)
+        starts = sorted({n.start for n in made})
+        ends = {s: max(n.start + n.duration for n in made if n.start == s) for s in starts}
+        bounds = sorted({c.end for c in plan.chords} | set(starts))
+        rings = [abs(ends[s] - min(b for b in bounds if b > s + 1e-6)) < 1e-6 for s in starts[:-1]]
+        assert all(rings) if held else not all(rings)
+
+
+def test_comp_and_bass_follow_the_melody_track_volume():
+    """새 반주 · 베이스 트랙(볼륨 100)의 세기는 멜로디의 세기에 트랙 볼륨까지 넣어 정한다 (볼륨 127이면 소리가 (1.27)²배)."""
+    from statistics import median
+
+    from app.generate.bass import bass_notes
+    from app.generate.chords import chord_notes
+
+    def louder(p):
+        p.tracks[0].volume = 127
+        return p
+
+    for make in (lambda p: chord_notes(p, pattern="stab", program=0, style="soul")[0],
+                 lambda p: bass_notes(p)[0]):
+        base = riff_with_bass()
+        quiet = make(base.model_copy(update={"tracks": base.tracks[:1]}))
+        loud = make(louder(base.model_copy(update={"tracks": [base.tracks[0].model_copy()]})))
+        assert median(n.velocity for n in loud) > median(n.velocity for n in quiet)
+
+
 def tones(chord) -> set[int]:
     from app.harmony.reharm import INTERVALS
 

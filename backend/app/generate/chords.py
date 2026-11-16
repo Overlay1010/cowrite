@@ -250,6 +250,9 @@ GENRE_COMP_NAMES = {
     "boombap": "붐뱁 길게", "pop": "팝 3-3-2", "rock": "록 8분음표", "house": "하우스 뒷박", "trap": "트랩 길게", "latin": "라틴 클라베",
 }
 PUSH = 0.5  # 박. 코드가 바뀌기 이만큼 안쪽에서 시작해 넘어가는 음 = 다음 코드를 당겨 친 것
+# 페달을 밟은 것처럼 다음 칠 때까지 끄는 장르 (리듬의 길이는 치는 자리만 정한다). 소울 리듬을 적힌 길이대로 끊었더니
+# 사이사이 반 박 ~ 1박씩 비어 "끊기는 소리처럼 코드가 찍힌다"를 들었다 (2026-11-17). 펑크 · 록 · 하우스 · 라틴 · 재즈는 끊어 친다
+HELD = {"soul", "lofi", "boombap", "pop", "trap"}
 # 7 · 9음을 넣는 장르. 음계 화음마다 넣을 텐션(reharm.TENSION)부터, 멜로디와 반음으로 부딪히면 한 단계씩 덜어 낸다
 COLORFUL = {"soul", "jazz", "lofi", "boombap", "funk"}
 LIGHTER = {"maj9": ["maj9", "maj7", "add9", "6"], "m9": ["m9", "m7", "madd9"], "9": ["9", "7"], "7": ["7"], "m7": ["m7"],
@@ -393,6 +396,14 @@ def follow(
             filled_text(filled, start, end, bpb))
 
 
+def heard_velocity(project: Project) -> float | None:
+    """곡에서 들리는 세기 (드럼 뺀 음 세기 가운데값). 트랙 볼륨까지 넣는다 — 재생은 볼륨 100이 0dB이고 40·log10 곡선이라
+    소리 크기가 (볼륨/100)²배다. 멜로디 볼륨이 127인 곡에 세기만 보고 반주를 깔아 반주가 멜로디보다 4dB 넘게 작았다 (2026-11-17).
+    반주 · 베이스 생성기가 새 트랙(볼륨 100)의 세기를 정할 때 쓴다. 음이 없으면 None."""
+    played = [n.velocity * (t.volume / 100) ** 2 for t in project.tracks if not t.is_drum for n in t.notes]
+    return median(played) if played else None
+
+
 def song_end(project: Project) -> float:
     """곡 끝 박 (마디 단위로 올림). 음이 없으면 0."""
     last = max((n.start + n.duration for t in project.tracks for n in t.notes), default=0.0)
@@ -439,7 +450,7 @@ def _stab(chords: list[ChordSpan], voiced: list[list[int]], start: float, end: f
     spans = [replace(c) for c in chords]
     for n, (h, i, push) in enumerate(hits):
         stop = min(chords[i].end, end, hits[n + 1][0] if n + 1 < len(hits) else end)
-        length = min(lengths.get(round(h, 4), 1.0), stop - h)
+        length = stop - h if patterns and style in HELD else min(lengths.get(round(h, 4), 1.0), stop - h)
         if push:
             spans[i - 1].end, spans[i].start = h, h
         vel = velocity + (ACCENT if abs(h % bpb) < 1e-6 else 0) + (PUSH_ACCENT if push else 0) + rng.randint(-HUMAN, HUMAN)
@@ -535,10 +546,10 @@ def chord_notes(
     chords, colors = _colored(project, chords, start, end) if style in COLORFUL and not progression else (chords, "")
     floor, ceil = playable(program)
     chords, windows = _windows(project, chords, start, end, height, floor, ceil)
-    played = [n.velocity for t in project.tracks if not t.is_drum for n in t.notes]
+    played = heard_velocity(project)
     # 장르 리듬은 길게 끄는 음이 많아 패드만큼 줄인다 (짧게 끊어 치는 기본 리듬만 덜 줄임)
     softer = STAB_SOFTER if pattern == "stab" and style not in GENRE_COMP else SOFTER
-    velocity = max(35, min(90, round(median(played) * softer))) if played else 64
+    velocity = max(35, min(90, round(played * softer))) if played else 64
     voiced = voicings(chords, windows, version, heard_with(project, chords, start, end))
     if not any(n.start < end and n.start + n.duration > start for t in project.tracks if not t.is_drum for n in t.notes):
         voiced = [_with_root(v, c, floor) for c, v in zip(chords, voiced)]

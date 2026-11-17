@@ -69,6 +69,14 @@ export const DRUM_ROLES: Record<number, DrumRole> = {
   49: 'crash', 52: 'crash', 55: 'crash', 57: 'crash', 51: 'ride', 53: 'ride', 59: 'ride',
 }
 
+/**
+ * 역할마다 들리는 크기 목표 (dB, 어쿠스틱 스네어 기준). 내장 소리의 크기 값(아래 DRUM_SOUNDS 세 번째 값)과
+ * 내 드럼 샘플(불러올 때 재서 맞춤, instruments.ts)이 같이 쓴다
+ */
+export const ROLE_DB: Record<DrumRole, number> = { kick: 0, snare: 0, clap: -2, hat: -9, openhat: -6, tom: -2, crash: -4, ride: -8 }
+/** 기준 어쿠스틱 스네어(drum_snare_hard)를 세기 127로 한 번 친 크기 — audio/loudness.ts로 잰 값 */
+export const SNARE_LUFS = -13.1
+
 const TOMS = [41, 43, 45, 47, 48, 50] // 낮은 탐 → 높은 탐
 // 탐 소리는 탐 6개(TOMS 순서)에 각각 샘플 · 속도를 둬서 높낮이를 나눈다
 const toms = (file: string, rates: number[], gain = 1): DrumSample[] => rates.map((r) => [file, r, gain])
@@ -77,7 +85,7 @@ const toms = (file: string, rates: number[], gain = 1): DrumSample[] => rates.ma
  * 드럼 소리 목록 (백엔드 app/tools/drums.py DRUM_SOUNDS와 같은 id · 이름, 테스트가 확인).
  * 샘플은 모두 Sonic Pi CC0. 고른 기준: 길이 · 밝기(스펙트럼 중심) · 저역 비율을 재서 비교 (docs/devlog.md v0.1-16 · 19).
  * 세 번째 값(크기)은 역할마다 같은 크기로 들리게 잰 값: 세기 127로 한 번 친 소리의 400ms 창 최대 K-가중 크기를 어쿠스틱 스네어 기준으로
- * 킥 · 스네어 0, 클랩 -2, 닫힌 햇 -9, 열린 햇 -6, 탐 -2, 크래시 -4, 라이드 -8dB에 맞췄다 (키우는 쪽은 +6dB까지, 2026-11-17).
+ * ROLE_DB에 맞췄다 (키우는 쪽은 +6dB까지, 2026-11-17).
  * 같은 역할인데 스플래시가 스네어보다 4dB, 열린 햇이 3dB 커서 록에서 햇 트랙이 스네어보다 컸다. 드럼 전체 크기는 master.ts
  */
 export const DRUM_SOUNDS: Record<string, { name: string; role: DrumRole; sample: DrumSample | DrumSample[] }> = {

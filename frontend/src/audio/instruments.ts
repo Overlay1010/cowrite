@@ -1,6 +1,7 @@
 import * as Tone from 'tone'
 import type { AudioClip, Note, Track } from '../api/types'
-import { DRUM_DEFAULT, GM_NAMES, drumSample, gmProgramOf, kitOf } from './catalog'
+import { DRUM_DEFAULT, DRUM_ROLES, GM_NAMES, ROLE_DB, SNARE_LUFS, drumSample, gmProgramOf, kitOf } from './catalog'
+import { bufferIntegratedLoudness, bufferLoudness } from './loudness'
 import { levelGain, noteSource } from './soundset'
 import { DRUM_DB } from './master'
 import { sampleBuffer, sampleMeta } from '../samples/library'
@@ -378,7 +379,14 @@ export function playEvents(track: Track, beatsPerBar: number): Note[] {
   return out
 }
 
-const LOOP_PEAK = 0.6 // 루프의 최대 크기를 이만큼으로 (드럼 · 악기와 섞였을 때 비슷하게)
+/**
+ * 루프 크기: 불러올 때 루프 전체의 크기(통합 LUFS, loudness.ts)를 재서 LOOP_LUFS로 맞춘다. 편곡 드럼 · 멜로디 트랙과 비슷한 크기
+ * (소울 편곡 드럼 -33, 볼륨 100 멜로디 -35 LUFS — 마스터 앞). 예전에는 최대 크기를 0.6으로 맞췄는데, 드럼을 17dB 줄인 뒤(master.ts)
+ * Cymatics 루프 2009개를 재 보니 루프가 가운데값 -20.6 LUFS(-25 ~ -17)로 드럼 · 멜로디보다 12~14dB 컸다 (2026-11-17)
+ */
+const LOOP_LUFS = -33
+const LOOP_PEAK = 0.6 // 크기를 못 재면(무음 등) 예전처럼 최대 크기로
+const LOOP_GAIN = [0.01, 4] as const
 const LOOP_EDGE = 0.004 // 초. 조각 이음매의 딸깍 소리를 막는 아주 짧은 페이드
 const LOOP_PREROLL = 0.003 // 초
 
@@ -401,7 +409,12 @@ class AudioLoopVoice implements Voice {
     this.level = new Tone.Gain(LOOP_PEAK / Math.max(meta?.peak ?? 1, 0.05)).connect(this.output)
     // 이 브라우저에 없는 루프는 소리 없이 (트랙 목록에 표시)
     this.ready = (meta ? sampleBuffer(clip.sample.id) : Promise.resolve(null)).then((raw) => {
-      if (raw) this.buffer = new Tone.ToneAudioBuffer(raw)
+      if (!raw) return
+      this.buffer = new Tone.ToneAudioBuffer(raw)
+      const heard = bufferIntegratedLoudness(raw)
+      if (Number.isFinite(heard)) {
+        this.level.gain.value = Math.min(LOOP_GAIN[1], Math.max(LOOP_GAIN[0], Math.pow(10, (LOOP_LUFS - heard) / 20)))
+      }
     })
   }
 
@@ -460,8 +473,22 @@ const KIT_FX: Record<number, () => Tone.ToneAudioNode[]> = {
 }
 const CLOSED_HATS = new Set([42, 44])
 const OPEN_HAT = 46
-// 내 드럼 샘플: 최대 크기를 이만큼으로 맞춘다 (내장 Sonic Pi 킷과 비슷한 크기 — 솔로로 내보내 잼)
+/**
+ * 내 드럼 샘플 크기: 불러올 때 들리는 크기(loudness.ts)를 재서 그 레인 역할의 목표(내장 소리와 같은 ROLE_DB)에 맞춘다.
+ * 예전에는 최대 크기를 0.9로 맞췄는데, Cymatics 원샷 211개로 재 보니 (가운데값) 킥 +0.6 · 스네어 −3 · 클랩 −2dB였지만
+ * 닫힌 햇 +1.5, 탐 +2, 크래시 +3, 열린 햇 +4, 라이드 +7dB로 심벌이 컸다 — 짧은 "틱"도 최대 크기는 킥만큼 나와서 (2026-11-17).
+ * 역할이 없는 레인은 예전처럼 최대 크기로
+ */
 const MY_DRUM_PEAK = 0.9
+const MY_DRUM_GAIN = [0.02, 8] as const // 맞출 때 곱하는 값의 한계 (거의 무음인 파일을 끝없이 키우지 않게)
+
+function myDrumGain(pitch: number, buffer: AudioBuffer, peak: number): number {
+  const role = DRUM_ROLES[pitch]
+  const heard = role ? bufferLoudness(buffer) : -Infinity
+  if (!role || !Number.isFinite(heard)) return MY_DRUM_PEAK / Math.max(peak, 0.05)
+  const gain = Math.pow(10, (SNARE_LUFS + ROLE_DB[role] - heard) / 20)
+  return Math.min(MY_DRUM_GAIN[1], Math.max(MY_DRUM_GAIN[0], gain))
+}
 // 탐 샘플 하나로 탐 레인 여섯을 낮은 탐 → 높은 탐으로 (내장 탐처럼 재생 속도로)
 const MY_TOM_RATES: Record<number, number> = { 41: 0.8, 43: 0.87, 45: 0.94, 47: 1, 48: 1.07, 50: 1.15 }
 const MY_DRUM_CUT = 0.02 // 초. 같은 레인을 다시 쳐서 앞 소리를 끊을 때 딸깍 소리가 나지 않게 줄이는 시간
@@ -503,7 +530,7 @@ class SampledDrumVoice implements Voice {
         const raw = meta?.kind === 'drum' ? await sampleBuffer(ref.id) : null
         if (!meta || !raw) return
         const pitch = Number(lane)
-        this.mine.set(pitch, { buffer: new Tone.ToneAudioBuffer(raw), gain: MY_DRUM_PEAK / Math.max(meta.peak ?? 1, 0.05), rate: MY_TOM_RATES[pitch] ?? 1 })
+        this.mine.set(pitch, { buffer: new Tone.ToneAudioBuffer(raw), gain: myDrumGain(pitch, raw, meta.peak ?? 1), rate: MY_TOM_RATES[pitch] ?? 1 })
       }),
     )
     this.ready = waitLoad((done, fail) => {

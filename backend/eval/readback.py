@@ -59,7 +59,8 @@ def score(songs: list[tuple[str, Project]]) -> tuple[int, int, int, int, int, Co
                     continue
                 total += 1
                 ok_root = got is not None and got.root == want.root
-                tones += ok_root and len(_tones(got) & _tones(want)) >= 3
+                # 3음 이상 겹침 — 제안이 3음 없는 코드(G5, 음 2개)면 그 음 수만큼 (2026-11-18, 예전 잣대로는 이름이 같아도 틀림)
+                tones += ok_root and len(_tones(got) & _tones(want)) >= min(3, len(_tones(want)))
                 if old is not None and old.name != want.name:
                     changed += 1
                     root_ok += ok_root

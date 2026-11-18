@@ -97,3 +97,14 @@ def test_legato_melody_counts_as_melody():
     p = riff_song(legato=True)
     bass = Track(id="t2", name="Bass", program=33, notes=[Note(pitch=43, start=b * 4.0, duration=4.0, velocity=90) for b in range(8)])
     assert melody_ids(p.model_copy(update={"tracks": [*p.tracks, bass]})) == {"t1"}
+
+
+def test_legato_riff_keeps_minor_key():
+    """레가토로 겹쳐 친 G 단조 리프도 G 단조. 3음 없는 마디(G와 지나가는 Ab만)를 "G"(장3화음)로 이름 붙이고,
+    "5"(3음 없음)도 장3화음으로 세어 마지막 코드가 장3화음 I인 G 장조를 골랐다."""
+    from app.harmony.analyze import _quality, analyze, family
+
+    assert _quality({0, 1}) == "5" and family("5") is None
+    for legato in (False, True):
+        key = analyze(riff_song(legato=legato)).key
+        assert (key.tonic, key.mode) == (7, "minor")

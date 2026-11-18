@@ -294,8 +294,7 @@ def test_review_of_clean_song_has_no_problems():
 
 
 def riff_with_bass() -> Project:
-    """앞 4마디는 G4 근처, 뒤 4마디는 옥타브 아래(G3 근처)에서 되풀이하는 리프 + 베이스 (tests/test_harmonize.py).
-    레가토로 겹치게 하면 조성을 G 장조로 읽는다 (조성 읽기의 약점 — 멜로디로 알아보는 건 test_harmonize에서)."""
+    """앞 4마디는 G4 근처, 뒤 4마디는 옥타브 아래(G3 근처)에서 되풀이하는 리프 + 베이스 (tests/test_harmonize.py)."""
     from tests.test_harmonize import riff_song
 
     p = riff_song()

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.models.project import Project, Track
 
@@ -215,7 +215,9 @@ def _quality(present: set[int]) -> str:
         return "7sus4" if m7 else "sus4"
     if nine:
         return "sus2"
-    return "5" if p5 else ""
+    # 5음도 없이 근음만 울려도 "5"(3음 없음) — 예전엔 ""(장3화음)이라 G와 지나가는 Ab만 친 마디가 "G"가 되어
+    # 단조 곡을 장조로 읽고(마지막 코드가 장3화음 I), 반주 · 베이스가 없는 B를 깔 뻔했다 (2026-11-18)
+    return "5"
 
 
 def name_chord(
@@ -311,6 +313,8 @@ DIATONIC = {
 
 
 def family(quality: str) -> str | None:
+    if quality == "5":  # 3음 없음 — 예전엔 아래 숫자 검사(7 · 9 · 13)에 걸려 장3화음으로 셌다 (2026-11-18)
+        return None
     if quality.startswith("dim") or quality == "m7b5":
         return "dim"
     if quality.startswith("m") and not quality.startswith("maj"):
@@ -487,6 +491,27 @@ def _tones(project: Project) -> list[Tone]:
     return out
 
 
+def _bare_roots(spans: list[ChordSpan], tones: list[Tone], key: KeyInfo) -> list[ChordSpan]:
+    """근음만 울린 구간(3음 · 5음 없음 — 옥타브로 끝나는 마지막 마디, 멜로디가 근음 둘레만 도는 마디)은 정한 조의 음계 화음으로
+    (G 장조면 G, G 단조면 Gm). 조를 정할 때는 장 · 단을 모르는 "5"로 둔다 — 장3화음으로 짐작해 단조 곡을 장조로 읽었다 (2026-11-18).
+    5음까지 울린 파워코드(G5)와, 조에서 장 · 단이 하나로 정해지지 않는 근음(단조의 V)은 그대로. 이름이 같아진 이웃은 합친다."""
+    out: list[ChordSpan] = []
+    for c in spans:
+        if c.quality == "5" and c.root is not None:
+            w, _, _, own, _ = _weights(tones, c.start, c.end)
+            fifth = (c.root + 7) % 12
+            allowed = DIATONIC[key.mode].get((c.root - key.tonic) % 12, set())
+            if w[fifth] < max(w) * PRESENT and fifth not in own and len(allowed) == 1:
+                q = {"maj": "", "min": "m", "dim": "dim"}[next(iter(allowed))]
+                head, *slash = c.name.split("/")
+                c = replace(c, quality=q, name="/".join([head[: -1] + q, *slash]))
+        if out and out[-1].name == c.name and abs(out[-1].end - c.start) < 1e-6:
+            out[-1] = replace(out[-1], end=c.end)
+        else:
+            out.append(c)
+    return out
+
+
 def analyze(project: Project, split_margin: float = 0.12) -> HarmonyAnalysis:
     """곡 전체를 분석한다. 드럼은 뺀다."""
     tones = _tones(project)
@@ -542,6 +567,7 @@ def analyze(project: Project, split_margin: float = 0.12) -> HarmonyAnalysis:
 
     # 4) 코드 진행까지 보고 키를 정하고, 그 키의 #/b로 이름을 다시 붙인 뒤 로마숫자 · 기능
     key = decide_key(hist, merged)
+    merged = _bare_roots(merged, tones, key)
     for c in merged:
         if c.root is not None:
             c.name = spell(c.root, key) + c.quality + (f"/{spell(c.bass, key)}" if c.bass is not None and c.bass != c.root else "")

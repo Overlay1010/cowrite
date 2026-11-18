@@ -32,9 +32,13 @@ def test_upload_get_summary_export(client, midi_bytes):
 
 
 def test_rejects_wrong_extension(client, midi_bytes):
-    r = upload(client, midi_bytes, "song.wav")
+    r = upload(client, midi_bytes, "song.txt")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_file_type"
+    # 오디오 확장자는 받지만 내용이 오디오가 아니면 읽지 못했다고
+    r = upload(client, midi_bytes, "song.wav")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "audio_parse_failed"
 
 
 def test_rejects_broken_midi(client):

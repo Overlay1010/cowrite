@@ -11,9 +11,9 @@ import { reopen } from './store/chat'
 import { usePlayer } from './store/player'
 import { useProject } from './store/project'
 import { handleShortcut } from './shortcuts'
+import { isOpenable } from './api/client'
 import { useSamples } from './samples/library'
 
-const isMidi = (f: File) => /\.midi?$/i.test(f.name)
 
 export default function App() {
   const { project, error } = useProject()
@@ -49,7 +49,7 @@ export default function App() {
   return (
     <div
       className="app"
-      // 창 어디에든 .mid를 끌어다 놓으면 연다
+      // 창 어디에든 .mid를 끌어다 놓으면 연다 (오디오는 음표로 바꿔서)
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files') || useSamplePack.getState().open) return // 샘플팩 창은 따로 받는다
         e.preventDefault()
@@ -62,10 +62,10 @@ export default function App() {
         e.preventDefault()
         setDragging(false)
         if (useSamplePack.getState().open) return
-        const file = [...e.dataTransfer.files].find(isMidi)
+        const file = [...e.dataTransfer.files].find(isOpenable)
         if (file) void useProject.getState().upload(file)
         else if (e.dataTransfer.files.length)
-          useProject.setState({ error: ".mid 또는 .midi 파일만 열 수 있어요. 샘플(WAV)은 위쪽 '내 샘플' 버튼에서 넣어요." })
+          useProject.setState({ error: '.mid 파일이나 오디오(.wav · .flac · .ogg · .mp3 · .aiff)만 열 수 있어요.' })
       }}
     >
       <TopBar />

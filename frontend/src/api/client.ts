@@ -27,6 +27,12 @@ async function parse<T>(res: Response): Promise<T> {
   throw new ApiError(code, message)
 }
 
+/** 열 수 있는 파일: MIDI, 또는 음표로 바꿔 여는 오디오 (서버 app/api/projects.py와 같은 목록) */
+export const AUDIO_TO_MIDI = /\.(wav|flac|ogg|mp3|aiff?)$/i
+export const OPENABLE_ACCEPT = '.mid,.midi,.wav,.flac,.ogg,.mp3,.aif,.aiff'
+export const isOpenable = (f: File) => /\.midi?$/i.test(f.name) || AUDIO_TO_MIDI.test(f.name)
+
+/** MIDI를 열거나 오디오를 음표로 바꿔 연다 */
 export async function uploadMidi(file: File): Promise<Project> {
   const form = new FormData()
   form.append('file', file)

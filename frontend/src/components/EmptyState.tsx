@@ -43,7 +43,8 @@ export function EmptyState() {
         <h1>MIDI를 열고, 말로 고치세요</h1>
         <p>
           FL Studio · Logic Pro · Cubase · Ableton Live에서 내보낸 .mid를 이 창에 끌어다 놓거나 위의 <strong>MIDI 열기</strong>를
-          누르세요. 바꾸고 싶은 걸 말하면 적용하기 전에 바뀐 소리를 먼저 들려 드려요.
+          누르세요. WAV 같은 오디오를 넣으면 음을 읽어 MIDI로 바꿔서 열어요. 바꾸고 싶은 걸 말하면 적용하기 전에 바뀐 소리를 먼저 들려
+          드려요.
         </p>
       </div>
 
@@ -53,7 +54,7 @@ export function EmptyState() {
           <path d="m7 8 5-5 5 5" />
           <path d="M20 15v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4" />
         </svg>
-        <span>.mid 파일을 여기에 끌어다 놓기 · 최대 5MB</span>
+        <span>.mid 파일(최대 5MB)이나 오디오(최대 10분)를 여기에 끌어다 놓기</span>
       </div>
 
       {recent.length > 0 && (

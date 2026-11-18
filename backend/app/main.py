@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app import config
 from app.agent import LLMError, LLMUnavailable
 from app.api import audio, chat, projects
+from app.midi_io import transcribe
 from app.tools import ToolError
 
 
@@ -17,6 +18,8 @@ async def lifespan(_: FastAPI):
     # 서버가 켜질 때 뒤에서 미리 불러 두어 첫 명령이 그 시간을 기다리지 않게 한다
     sdk = "anthropic" if config.LLM_PROVIDER == "anthropic" else "openai"
     threading.Thread(target=importlib.import_module, args=(sdk,), daemon=True).start()
+    # 오디오 → 음표 모델도 처음 불러오는 데 16초쯤 걸린다 (app/midi_io/transcribe.py)
+    threading.Thread(target=transcribe.warm_up, daemon=True).start()
     yield
 
 

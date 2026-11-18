@@ -6,11 +6,13 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.midi_io.convert import MidiParseError, midi_bytes_to_project, project_to_midi_bytes
+from app.midi_io.transcribe import AudioParseError, audio_bytes_to_project
 from app.models.project import Note, Project, ProjectSummary, Track
 from app.agent.prompt import DRUM_NAMES, note_name
 from app.agent.session import note
@@ -26,6 +28,9 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 ALLOWED_SUFFIXES = {".mid", ".midi"}
+# 오디오 → 음표 (app/midi_io/transcribe.py). 44.1kHz 스테레오 16비트 WAV로 약 9분 — 변환은 10분까지
+MAX_AUDIO_BYTES = 100 * 1024 * 1024
+AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".aif", ".aiff"}
 
 
 def _error(status: int, code: str, message: str) -> HTTPException:
@@ -56,19 +61,28 @@ def recent_projects() -> list[RecentOut]:
 
 
 @router.post("", response_model=Project)
-async def upload_midi(file: UploadFile = File(...)) -> Project:
+async def upload_midi(file: UploadFile = File(...), bpm: float | None = Form(default=None, gt=0, le=400)) -> Project:
+    """MIDI를 열거나, 오디오(WAV 등)를 음표로 바꿔 연다. bpm은 오디오에만 쓴다 (없으면 파일 이름 → 짐작)."""
     filename = file.filename or "untitled.mid"
-    if Path(filename).suffix.lower() not in ALLOWED_SUFFIXES:
-        raise _error(400, "invalid_file_type", ".mid 또는 .midi 파일만 올릴 수 있습니다.")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES | AUDIO_SUFFIXES:
+        raise _error(400, "invalid_file_type", ".mid · .midi 또는 오디오(.wav · .flac · .ogg · .mp3 · .aiff) 파일만 열 수 있습니다.")
+    audio = suffix in AUDIO_SUFFIXES
+    limit = MAX_AUDIO_BYTES if audio else MAX_UPLOAD_BYTES
 
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise _error(413, "file_too_large", "파일은 5MB 이하만 올릴 수 있습니다.")
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise _error(413, "file_too_large", f"{'오디오' if audio else 'MIDI'} 파일은 {limit // (1024 * 1024)}MB 이하만 열 수 있습니다.")
 
     try:
-        project = midi_bytes_to_project(data, name=Path(filename).stem)
+        if audio:
+            project = await run_in_threadpool(audio_bytes_to_project, data, Path(filename).stem, bpm)
+        else:
+            project = midi_bytes_to_project(data, name=Path(filename).stem)
     except MidiParseError as e:
         raise _error(400, "midi_parse_failed", str(e))
+    except AudioParseError as e:
+        raise _error(400, "audio_parse_failed", str(e))
 
     return store.create(project)
 

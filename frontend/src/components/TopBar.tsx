@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { audioFormats, convertAudio, downloadMidi, downloadTracksZip, saveBlob } from '../api/client'
+import { OPENABLE_ACCEPT, audioFormats, convertAudio, downloadMidi, downloadTracksZip, saveBlob } from '../api/client'
 import { invalidate, positionBeats } from '../audio/engine'
 import { SOUND_SETS, currentSet, useSoundSet } from '../audio/soundset'
 import { useShortcutHelp } from '../shortcuts'
@@ -338,7 +338,7 @@ export function TopBar() {
         <input
           ref={input}
           type="file"
-          accept=".mid,.midi"
+          accept={OPENABLE_ACCEPT}
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0]
@@ -346,7 +346,7 @@ export function TopBar() {
             e.target.value = ''
           }}
         />
-        <button onClick={() => input.current?.click()} disabled={loading}>
+        <button onClick={() => input.current?.click()} disabled={loading} title=".mid 파일 열기 · 오디오(WAV 등)는 음을 읽어 MIDI로 바꿔서 열어요">
           {loading ? '읽는 중…' : 'MIDI 열기'}
         </button>
         {project && (

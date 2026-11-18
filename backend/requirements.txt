@@ -2,6 +2,11 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 pretty_midi>=0.2.10
+# 오디오 → 음표 (Basic Pitch 모델을 onnxruntime으로)
+numpy>=1.26
+onnxruntime>=1.20
+soundfile>=0.12
+scipy>=1.13
 pydantic>=2.7
 anthropic==1.15.0
 openai==3.20.0

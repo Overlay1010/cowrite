@@ -231,6 +231,30 @@ def test_arpeggio_is_harmony_not_melody():
     assert [c.name for c in a.chords] == ["C7"]
 
 
+def test_close_ninth_arpeggio_is_harmony_not_melody():
+    # 한 옥타브 안에 모은 9화음을 8분음표로 오르내리면(Dm9 = A C D E F E D C) 거의 2도라 멜로디로 읽어
+    # 3 · 7 · 9음을 놓치고(Dm9 → D) 조성까지 틀렸다 (eval/harmony.py 펼침화음 ii9–V9–Imaj9–VI7)
+    from app.harmony.analyze import _is_melody
+
+    tonic = 8  # Ab major — 예전에 틀리던 조 중 하나
+    chords = [(2, (0, 3, 7, 10, 14)), (7, (0, 4, 7, 10, 14)), (0, (0, 4, 7, 11, 14)), (9, (0, 4, 7, 10))] * 2
+    keys, bass = [], []
+    for b, (deg, shape) in enumerate(chords):
+        root = (tonic + deg) % 12
+        close = sorted(55 + ((root + i) % 12 - 55) % 12 for i in shape)
+        seq = close + close[-2:0:-1]
+        keys += [Note(pitch=seq[i % len(seq)], start=b * 4 + i * 0.5, duration=0.5) for i in range(8)]
+        bass.append(Note(pitch=36 + root, start=b * 4, duration=4))
+    arp = Track(id="t1", name="Keys", notes=keys)
+    assert not _is_melody(arp, "t2")
+    a = analyze(Project(id="p", tracks=[arp, Track(id="t2", name="Bass", notes=bass)]))
+    assert a.key.name == "Ab major"
+    assert [c.name for c in a.chords] == ["Bbm9", "Eb9", "Abmaj9", "F7"] * 2
+    # 고른 리듬으로 2도씩 움직여도 자주 꺾이는 멜로디는 그대로 멜로디
+    walk = [60, 62, 64, 62, 64, 65, 64, 62, 60, 62, 59, 60, 62, 64, 65, 67]
+    assert _is_melody(Track(id="t3", name="Lead", notes=[Note(pitch=p, start=i * 0.5, duration=0.5) for i, p in enumerate(walk)]), "t2")
+
+
 def test_leaping_melody_with_varied_rhythm_stays_melody():
     # 코드음을 따라 뛰어도 리듬이 들쭉날쭉하면 멜로디 → 지나가는 음(A = 6음)이 이름에 붙지 않는다
     lead = [Note(pitch=p, start=s, duration=d) for p, s, d in [(72, 0, 1.5), (76, 1.5, 0.5), (69, 2, 1), (79, 3, 1)]]

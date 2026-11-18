@@ -22,6 +22,12 @@ Tone = tuple[int, float, float, float, int]
 MELODY_WEIGHT = 0.5
 STEPWISE = 0.5  # 한 줄 트랙에서 2도 이내로 움직인 비율이 이 이상이면 멜로디 (아래면 펼침화음). 멜로디는 보통 6~7할이 2도
 EVEN_RHYTHM = 0.8  # 뛰어 움직이는 한 줄 트랙이라도, 음 사이 간격이 이만큼 같아야 펼침화음 (아니면 멜로디)
+# 2도로 움직여도 고른 리듬으로 오르내림마다 3음 넘게(SWEEP_NOTES) 한 방향을 이어 가는 구간이 이 비율 이상이면 펼침화음 —
+# 한 옥타브 안에 모은 9화음(A C D E F)을 오르내리면 거의 2도라 멜로디로 읽고 3 · 7 · 9음을 놓쳤다 (2026-11-18).
+# 생성 곡 펼침화음 0.88~1.0, 고른 리듬 민요 멜로디 최대 0.64, 음계를 무작위로 걷는 생성 멜로디 1920개 중 2개만 0.8 넘음.
+# 평균 길이로 재면 한 번 길게 쭉 간 멜로디도 걸렸다 (1920개 중 11개)
+SWEEP = 0.8
+SWEEP_NOTES = 3
 
 # ---------- 이름 ----------
 
@@ -437,15 +443,33 @@ def _is_melody(track: Track, lowest: str | None) -> bool:
 
     펼침화음(아르페지오)도 한 줄이지만 3 · 4도로 뛰며 같은 리듬(8분음표만 …)을 되풀이한다 → 화음으로 본다.
     멜로디는 대부분 2도(반음 · 온음)로 움직이고, 코드음을 따라 뛰는 멜로디도 음 길이가 들쭉날쭉하다.
+    촘촘히 모은 펼침화음은 2도로 움직여도 고른 리듬으로 길게 오르내린다(SWEEP) — 멜로디는 방향을 자주 바꾼다.
     """
     if track.id == lowest or len(track.notes) < 2 or not is_line(track):
         return False
     notes = sorted(track.notes, key=lambda n: n.start)
-    moves = [abs(b.pitch - a.pitch) for a, b in zip(notes, notes[1:]) if b.pitch != a.pitch]
-    if not moves or sum(1 for m in moves if m <= 2) / len(moves) >= STEPWISE:
+    moves = [b.pitch - a.pitch for a, b in zip(notes, notes[1:]) if b.pitch != a.pitch]
+    if not moves:
         return True
     gaps = Counter(round(b.start - a.start, 2) for a, b in zip(notes, notes[1:]))
-    return gaps.most_common(1)[0][1] / (len(notes) - 1) < EVEN_RHYTHM
+    even = gaps.most_common(1)[0][1] / (len(notes) - 1) >= EVEN_RHYTHM
+    if sum(1 for m in moves if abs(m) <= 2) / len(moves) >= STEPWISE:
+        return not (even and _sweeps(moves) >= SWEEP)
+    return not even
+
+
+def _sweeps(moves: list[int]) -> float:
+    """한 방향으로 SWEEP_NOTES번 넘게 이어 움직인 구간의 비율 (처음 · 끝 구간은 잘렸을 수 있어 빼고)."""
+    runs, cur = [], 1
+    for a, b in zip(moves, moves[1:]):
+        if (a > 0) == (b > 0):
+            cur += 1
+        else:
+            runs.append(cur)
+            cur = 1
+    runs.append(cur)
+    inner = runs[1:-1] or runs
+    return sum(1 for r in inner if r >= SWEEP_NOTES) / len(inner)
 
 
 def melody_ids(project: Project) -> set[str]:

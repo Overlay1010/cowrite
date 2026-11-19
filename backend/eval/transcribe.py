@@ -5,14 +5,16 @@
 - 완성 루프 wav는 여러 악기가 섞이고 mid는 그중 한 악기라서 정답 음을 찾은 비율(재현율)만 본다.
 - 같은 폴더의 악기별 stem wav는 하나씩 바꿔 mid와 가장 잘 맞는 stem의 F1 (mid 길이 안 음표만).
   샘플팩 신스는 mid보다 한두 옥타브 위아래로 울리는 게 많아 옥타브를 옮겨 맞춘 F1도 함께.
+- 코드: 정답 mid와 변환 결과를 같은 화성 분석(app/harmony)으로 읽어 박마다 근음이 같은 비율 (완성 루프 · 가장 맞는 stem).
 - 조성: 변환한 완성 루프 / 정답 mid를 같은 엔진으로 읽어 이름의 조와 비교.
-- 템포: 이름의 BPM을 가리고 짐작한 값.
+- 템포: 이름의 BPM을 가리고 짐작한 값. 루프가 아닌 녹음 대신 완성 루프의 끝을 잘라(70%) · 앞을 잘라(0.3마디) 다시 바꿔 본다.
+- 음표 묶기를 고칠 때는 곡 이름으로 나눈 A/B 두 묶음에서 모두 오르는지 본다 (한쪽에 맞춘 조정 막기).
 """
 
 from __future__ import annotations
 
-import io
 import os
+import zlib
 import re
 import sys
 import time
@@ -22,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from app.harmony.analyze import SHARP, analyze
+from app.models.project import Note, Project, Track
 from app.midi_io import transcribe as T
 from app.midi_io.convert import MidiParseError, midi_bytes_to_project
 from eval.harmony import MIREX, key_relation
@@ -76,7 +79,27 @@ def tempo_verdict(est: float, true: float) -> str:
 
 def pct(values: list[float]) -> str:
     q = np.percentile(values, [25, 50, 75])
-    return " · ".join(f"{v:.2f}" for v in q)
+    return " · ".join(f"{v:.2f}" for v in q) + f" | {np.mean(values):.2f}"
+
+
+def group(name: str) -> str:
+    """곡 이름으로 나눈 A/B 묶음 (고칠 때 한쪽에서 고르고 다른 쪽에서 확인)."""
+    return "AB"[zlib.crc32(name.encode()) % 2]
+
+
+def chord_roots_agree(ref: Project, got: Project, end: float) -> float | None:
+    """박마다(박 가운데) 두 분석의 코드 근음이 같은 비율. 정답이 화음 없음(N.C.)인 박은 뺀다."""
+    a, b = analyze(ref).chords, analyze(got).chords
+    at = lambda cs, t: next((c for c in cs if c.start <= t < c.end), None)  # noqa: E731
+    same = n = 0
+    for t in np.arange(0.5, end, 1.0):
+        rc = at(a, t)
+        if rc is None or rc.root is None:
+            continue
+        n += 1
+        gc = at(b, t)
+        same += gc is not None and gc.root == rc.root
+    return same / n if n else None
 
 
 def main() -> None:
@@ -85,8 +108,10 @@ def main() -> None:
         print("samples/private에 같은 이름의 wav · mid 짝이 없어 건너뜀")
         return
     mix_rec, mix_rec_pc, stem_f1, stem_f1_oct, stem_p, stem_r = [], [], [], [], [], []
+    chords: dict[str, list[float]] = {"mix": [], "stem": []}
+    f1_by_group: dict[str, list[float]] = {"A": [], "B": []}
     keys: dict[str, Counter] = {"audio": Counter(), "midi": Counter()}
-    tempo = Counter()
+    tempo: dict[str, Counter] = {"원본": Counter(), "끝 자름": Counter(), "앞 자름": Counter()}
     seconds = spent = 0.0
     songs = 0
     for mid, wav in found:
@@ -97,39 +122,53 @@ def main() -> None:
             midi_project = midi_bytes_to_project(mid.read_bytes(), "m")
         except MidiParseError:
             continue
-        ref = sorted((n.start, n.pitch) for t in midi_project.tracks if not t.is_drum for n in t.notes)
+        ref_notes = [n for t in midi_project.tracks if not t.is_drum for n in t.notes]
+        ref = sorted((n.start, n.pitch) for n in ref_notes)
         if not ref:
             continue
         songs += 1
         tol = TOL_SECONDS * bpm / 60
-        end = max(n.start + n.duration for t in midi_project.tracks for n in t.notes) + tol
+        end = max(n.start + n.duration for n in ref_notes) + tol
+        # 정답을 이름의 템포로 (mid에 박힌 템포는 120인 게 많다) — 화성 분석이 마디를 템포와 상관없이 박으로 나누지만 맞춰 둔다
+        ref_project = Project(id="r", name="r", tempo=bpm, tracks=[Track(id="t1", name="r", program=0, notes=ref_notes)])
 
-        def notes_of(path: Path) -> tuple[list[T.NoteEvent], float]:
+        def run(audio: np.ndarray) -> T.Transcription:
             nonlocal seconds, spent
-            audio = T.load_audio(path.read_bytes())
             t0 = time.perf_counter()
-            events = T.transcribe(audio)
+            tr = T.transcribe_audio(audio)
             spent += time.perf_counter() - t0
-            seconds += len(audio) / T.SAMPLE_RATE
-            return events, len(audio) / T.SAMPLE_RATE
+            seconds += tr.seconds
+            return tr
 
-        events, dur = notes_of(wav)
+        audio = T.load_audio(wav.read_bytes())
+        tr = run(audio)
+        events = tr.events
         est = [(e.start * bpm / 60, e.pitch) for e in events]
         mix_rec.append(match(ref, est, tol)[2])
         mix_rec_pc.append(match([(s, p % 12) for s, p in ref], [(s, p % 12) for s, p in est], tol)[2])
-        tempo[tempo_verdict(T.estimate_bpm(events, dur), bpm)] += 1
+        tempo["원본"][tempo_verdict(T.estimate_bpm(tr), bpm)] += 1
+        tail = audio[: int(len(audio) * 0.7)]
+        head = audio[int(0.3 * 240 / bpm * T.SAMPLE_RATE) :]
+        tempo["끝 자름"][tempo_verdict(T.estimate_bpm(T.transcribe_audio(tail)), bpm)] += 1
+        tempo["앞 자름"][tempo_verdict(T.estimate_bpm(T.transcribe_audio(head)), bpm)] += 1
+        converted = T.events_to_project(events, "a", bpm, [])
+        if (c := chord_roots_agree(ref_project, converted, end)) is not None:
+            chords["mix"].append(c)
         if want:
-            audio_key = analyze(T.events_to_project(events, "a", bpm, [])).key
+            audio_key = analyze(converted).key
             midi_key = analyze(midi_project).key
             keys["audio"][key_relation((audio_key.tonic, audio_key.mode), want)] += 1
             keys["midi"][key_relation((midi_key.tonic, midi_key.mode), want)] += 1
 
         stems = [s for s in mid.parent.glob("*.wav") if not s.name.startswith("._")]
         best = best_oct = (0.0, 0.0, 0.0)
+        best_events: list[T.NoteEvent] = []
         for s in stems:
-            ev, _ = notes_of(s)
+            ev = run(T.load_audio(s.read_bytes())).events
             e = [(x.start * bpm / 60, x.pitch) for x in ev if x.start * bpm / 60 <= end]
-            best = max(best, match(ref, e, tol))
+            m = match(ref, e, tol)
+            if m > best:
+                best, best_events = m, ev
             for octave in (-24, -12, 0, 12, 24):
                 best_oct = max(best_oct, match(ref, [(b, p + octave) for b, p in e], tol))
         if stems:
@@ -137,23 +176,31 @@ def main() -> None:
             stem_p.append(best[1])
             stem_r.append(best[2])
             stem_f1_oct.append(best_oct[0])
+            f1_by_group[group(wav.stem)].append(best[0])
+            if best_events and (c := chord_roots_agree(ref_project, T.events_to_project(best_events, "s", bpm, []), end)) is not None:
+                chords["stem"].append(c)
         print(f"  {songs:3d} {wav.stem[:60]}", file=sys.stderr, flush=True)
 
     print("## 오디오 → MIDI 평가\n")
-    print(f"샘플팩 루프 {songs}곡 (같은 이름의 wav · mid 짝, 이름에 BPM), 시작점 ±{TOL_SECONDS * 1000:.0f}ms · 같은 음이면 맞음. 값은 25% · 중간 · 75%\n")
+    print(f"샘플팩 루프 {songs}곡 (같은 이름의 wav · mid 짝, 이름에 BPM), 시작점 ±{TOL_SECONDS * 1000:.0f}ms · 같은 음이면 맞음. 값은 25% · 중간 · 75% | 평균\n")
     print("| 무엇 | 곡 | 값 |")
     print("|---|---|---|")
     print(f"| 완성 루프: 정답 음을 찾은 비율 | {len(mix_rec)} | {pct(mix_rec)} |")
     print(f"| 완성 루프: 음이름만 (옥타브 무시) | {len(mix_rec)} | {pct(mix_rec_pc)} |")
     print(f"| 악기별 stem 중 가장 맞는 것 F1 | {len(stem_f1)} | {pct(stem_f1)} |")
     print(f"| └ 정밀도 · 재현율 (중간) | {len(stem_f1)} | {np.median(stem_p):.2f} · {np.median(stem_r):.2f} |")
+    print(f"| └ 묶음 A · B 평균 | {len(f1_by_group['A'])} · {len(f1_by_group['B'])} | {np.mean(f1_by_group['A']):.3f} · {np.mean(f1_by_group['B']):.3f} |")
     print(f"| 악기별 stem, 옥타브를 옮겨 맞춘 F1 | {len(stem_f1)} | {pct(stem_f1_oct)} |")
+    print(f"| 코드 근음이 정답과 같은 박 (완성 루프) | {len(chords['mix'])} | {pct(chords['mix'])} |")
+    print(f"| 코드 근음이 정답과 같은 박 (가장 맞는 stem) | {len(chords['stem'])} | {pct(chords['stem'])} |")
     for k, c in keys.items():
         n = sum(c.values())
         score = sum(MIREX[r] * v for r, v in c.items()) / n
         label = "변환한 완성 루프" if k == "audio" else "정답 mid"
         print(f"\n조성 — {label}: 정답 {c['정답']}/{n} · MIREX {score:.2f} · " + " · ".join(f"{r} {v}" for r, v in c.most_common() if r != "정답"))
-    print(f"\n템포 짐작 (이름을 가리고): " + " · ".join(f"{r} {tempo[r]}" for r in ("정확", "반", "두 배", "틀림")) + f" / {sum(tempo.values())}")
+    print()
+    for k, c in tempo.items():
+        print(f"템포 짐작 (이름을 가리고, {k}): " + " · ".join(f"{r} {c[r]}" for r in ("정확", "반", "두 배", "틀림")) + f" / {sum(c.values())}  ")
     print(f"\n속도: 오디오 1초에 {spent / seconds:.3f}초 (모델 + 음표 묶기, 파일 읽기 빼고)")
 
 

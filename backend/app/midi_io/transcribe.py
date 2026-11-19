@@ -201,8 +201,18 @@ def _notes(frames: np.ndarray, onsets: np.ndarray, min_note_len: int) -> list[tu
     return events
 
 
-def transcribe(audio: np.ndarray) -> list[NoteEvent]:
-    """22050Hz 모노 → 음표 (초 단위, 시작 순)."""
+@dataclass(frozen=True)
+class Transcription:
+    events: list[NoteEvent]
+    onset_env: np.ndarray  # 모델 칸마다 시작점 세기 (88음 합, ±23ms 최댓값, 평균 1) — 템포 짐작용
+    times: np.ndarray  # 칸마다 시각(초)
+    seconds: float
+
+
+def transcribe_audio(audio: np.ndarray) -> Transcription:
+    """22050Hz 모노 → 음표 (초 단위, 시작 순) + 템포 짐작에 쓸 시작점 세기."""
+    from scipy.ndimage import maximum_filter1d
+
     frames, onsets = model_output(audio)
     min_len = int(np.round(MIN_NOTE_MS / 1000 * FPS))
     times = _frame_times(frames.shape[0])
@@ -210,38 +220,70 @@ def transcribe(audio: np.ndarray) -> list[NoteEvent]:
         NoteEvent(start=max(0.0, float(times[s])), end=float(times[e]), pitch=p, amplitude=a)
         for s, e, p, a in _notes(frames, onsets, min_len)
     ]
-    return sorted(events, key=lambda n: (n.start, n.pitch))
+    env = maximum_filter1d(onsets.sum(axis=1), size=5)
+    env = env / env.mean() if env.mean() > 0 else env
+    return Transcription(sorted(events, key=lambda n: (n.start, n.pitch)), env, times, len(audio) / SAMPLE_RATE)
 
 
-# 이름에 템포가 없을 때 짐작하기 (샘플팩 루프 89개, 정답 = 이름의 BPM): 정확 50 · 반/두 배 9 · 틀림 30.
-# 루프 길이가 1 · 2 · 4 · 8 …마디라고 보고 85~170 BPM에 드는 템포(앱의 루프 규칙 samples/analyze.ts grooveOf와 같다)를 쓰되,
-# 그 템포의 8분음표 격자에 시작점이 붙는 정도가 85~170 BPM 중 가장 잘 붙는 템포의 GRID_KEEP배보다 못하면
-# 길이가 마디로 떨어지지 않는 녹음으로 보고 가장 잘 붙는 템포를 쓴다. (길이만 54, 격자만 52, 정수 마디 후보 중 격자 48)
-BPM_LOW = 85
-GRID_KEEP = 0.8
+def transcribe(audio: np.ndarray) -> list[NoteEvent]:
+    return transcribe_audio(audio).events
 
 
-def _grid_fit(onsets: np.ndarray, weights: np.ndarray, bpm: float) -> float:
-    """시작점이 8분음표 격자(파일 처음 = 박)에 붙는 정도 0~1."""
-    phase = onsets * bpm / 60 * 2
-    off = np.abs(phase - np.round(phase))
-    return float(np.sum(weights * np.exp(-((off / 0.08) ** 2))) / np.sum(weights))
+# 이름에 템포가 없을 때 짐작하기 (샘플팩 루프 90곡, 정답 = 이름의 BPM): 정확 77 · 반/두 배 8 · 틀림 5 (예전 규칙 51 · 9 · 30).
+# 후보는 (1) 루프 길이 = N마디인 템포 — 샘플팩 루프는 90곡 모두 정확히 정수 마디다(4 · 8 · 16만이 아니라 12 · 24 · 34마디도) —
+# 와 (2) 60~190 BPM을 0.5 간격으로, 첫 박 위치도 박의 1/8씩 옮겨 본 자유 템포(마디로 잘리지 않은 녹음).
+# 첫 박부터 박 · 뒷박 · 16분 자리에 시작점이 몰리는 정도가 가장 높은 것을 고른다. 이 점수는 반/두 배까지는 잘 맞히지만
+# 어느 쪽인지는 못 가려서(느린 쪽을 좋아한다) 90~180 BPM으로 접는다 — 90곡 중 81곡이 이 창에 든다.
+TEMPO_LOW, TEMPO_HIGH = 60, 190
+TEMPO_FOLD = 90
+GRID_WEIGHTS = (1.0, 0.6, 0.3)  # 박 · 뒷박(8분) · 그 사이 16분
 
 
-def estimate_bpm(events: list[NoteEvent], seconds: float) -> float:
-    if not events or seconds <= 0:
-        return 120.0
-    onsets = np.array([e.start for e in events])
-    weights = np.array([e.amplitude for e in events])
-    grid = np.arange(BPM_LOW, BPM_LOW * 2, 0.25)
-    fits = np.array([_grid_fit(onsets, weights, b) for b in grid])
-    bars = 1
-    while bars * 240 / seconds < BPM_LOW:
-        bars *= 2
-    by_length = bars * 240 / seconds
-    if by_length < BPM_LOW * 2 and _grid_fit(onsets, weights, by_length) >= GRID_KEEP * fits.max():
-        return round(by_length, 2)
-    return float(grid[int(np.argmax(fits))])
+def _grid_score(tr: Transcription, bpm: float, phase: float = 0.0) -> float:
+    """phase초를 첫 박으로 놓은 bpm 격자에서 박 · 뒷박 · 16분 자리의 시작점 세기 평균 (전체 평균 = 1)."""
+    t = np.arange(phase, tr.times[-1], 15 / bpm)
+    if not len(t):
+        return 0.0
+    v = tr.onset_env[np.clip(np.searchsorted(tr.times, t), 0, len(tr.times) - 1)]
+    k = np.arange(len(t)) % 4
+    parts = (v[k == 0], v[k == 2], v[k % 2 == 1])
+    return float(sum(w * p.mean() for w, p in zip(GRID_WEIGHTS, parts) if len(p)) / sum(GRID_WEIGHTS))
+
+
+def _fold(bpm: float) -> float:
+    while bpm < TEMPO_FOLD:
+        bpm *= 2
+    while bpm >= TEMPO_FOLD * 2:
+        bpm /= 2
+    return bpm
+
+
+def estimate_tempo(tr: Transcription) -> tuple[float, float]:
+    """(템포, 첫 박 위치 초). 루프면 첫 박 = 파일 처음(0)."""
+    if not tr.events or len(tr.times) < 2 or tr.seconds <= 0:
+        return 120.0, 0.0
+    loops = [n * 240 / tr.seconds for n in range(1, int(TEMPO_HIGH * tr.seconds / 240) + 1)]
+    cands = [(_grid_score(tr, bpm), bpm, 0.0) for bpm in loops if bpm >= TEMPO_LOW]
+    cands += [
+        (_grid_score(tr, bpm, phase), bpm, phase)
+        for bpm in np.arange(TEMPO_LOW, TEMPO_HIGH, 0.5)
+        for phase in np.arange(8) * 7.5 / bpm  # 첫 박 위치: 박을 8로 나눠 옮겨 본다
+    ]
+    _, bpm, phase = max(cands)
+    bpm = round(_fold(float(bpm)), 2)
+    return bpm, float(phase) % (60 / bpm)
+
+
+def estimate_bpm(tr: Transcription) -> float:
+    return estimate_tempo(tr)[0]
+
+
+def align_to_beat(events: list[NoteEvent], bpm: float, phase: float) -> list[NoteEvent]:
+    """첫 박 위치(phase초)가 박 위에 오도록 음을 뒤로 민다 (0 ≤ 미는 양 < 한 박). 앞부분은 못갖춘마디가 된다."""
+    lead = (-phase) % (60 / bpm)
+    if lead < 1e-6:
+        return events
+    return [NoteEvent(e.start + lead, e.end + lead, e.pitch, e.amplitude) for e in events]
 
 
 def events_to_project(events: list[NoteEvent], name: str, bpm: float, warnings: list[str]) -> Project:
@@ -268,13 +310,14 @@ def events_to_project(events: list[NoteEvent], name: str, bpm: float, warnings: 
 
 
 def audio_bytes_to_project(data: bytes, name: str, bpm: float | None = None) -> Project:
-    audio = load_audio(data)
-    events = transcribe(audio)
+    tr = transcribe_audio(load_audio(data))
+    events = tr.events
     warnings = ["오디오에서 음을 읽어 만든 MIDI예요. 여러 악기가 섞인 소리는 음이 빠지거나 더 생길 수 있어요."]
     if bpm is None:
         bpm = bpm_from_name(name)
         if bpm is None:
-            bpm = estimate_bpm(events, len(audio) / SAMPLE_RATE)
+            bpm, phase = estimate_tempo(tr)
+            events = align_to_beat(events, bpm, phase)
             warnings.append(
                 f"템포를 소리에서 짐작했어요({bpm:g} BPM). 들리는 박자는 그대로지만, 틀렸다면 마디 줄이 어긋나 보여요. "
                 "파일 이름에 '120 BPM'처럼 템포를 넣어 다시 열면 그 템포로 읽어요."

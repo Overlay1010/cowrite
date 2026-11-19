@@ -68,12 +68,28 @@ def test_bpm_from_name():
     assert T.bpm_from_name("1000 BPM") is None
 
 
+# 100 BPM, 마디마다 4분 · 8분 · 16분이 섞인 리듬 (2마디 반복)
+RHYTHM = [0, 1, 1.5, 2, 2.75, 3, 3.5, 4, 5, 5.5, 6, 6.25, 6.5, 7]
+MELODY = [(60 + (i * 5) % 12, b + rep * 8, 0.25) for rep in range(2) for i, b in enumerate(RHYTHM)]
+
+
 def test_estimate_bpm_from_loop_length():
-    # 100 BPM 4마디 루프, 8분음표마다
-    events = [T.NoteEvent(start=i * 0.3, end=i * 0.3 + 0.2, pitch=60, amplitude=0.5) for i in range(32)]
-    assert T.estimate_bpm(events, 9.6) == 100
-    # 길이가 마디로 떨어지지 않는 녹음(첫 음 뒤로 조금 남음)은 격자에 맞는 템포
-    assert abs(T.estimate_bpm(events, 10.3) - 100) <= 0.5
+    # 4마디 = 9.6초 루프: 길이가 N마디인 템포 중 박 · 8분 · 16분 자리에 시작점이 몰리는 것
+    tr = T.transcribe_audio(T.load_audio(render(MELODY, 100, 16)))
+    assert abs(tr.seconds - 9.6) < 0.01
+    assert T.estimate_bpm(tr) == 100
+
+
+def test_estimate_bpm_for_recording_not_cut_to_bars():
+    # 앞에 0.37초 쉬고 시작해 4마디 뒤 조금 남는 녹음 → 길이가 마디로 떨어지지 않으니 자유 템포 + 첫 박 위치
+    wav = render([(p, b + 0.37 * 100 / 60, d) for p, b, d in MELODY], 100, 17.3)
+    tr = T.transcribe_audio(T.load_audio(wav))
+    bpm, phase = T.estimate_tempo(tr)
+    assert abs(bpm - 100) <= 1
+    # 첫 박 위치만큼 밀면 음이 16분 격자 위에 온다
+    project = T.events_to_project(T.align_to_beat(tr.events, bpm, phase), "x", bpm, [])
+    off = [abs(n.start * 4 - round(n.start * 4)) for n in project.tracks[0].notes]
+    assert np.median(off) < 0.15
 
 
 def test_upload_wav_opens_as_project(client):

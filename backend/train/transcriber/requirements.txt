@@ -1,0 +1,9 @@
+# 학습 전용 (앱 실행에는 필요 없음). Python 3.12 · CPU에서 확인
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0
+onnx>=1.17
+onnx2torch>=1.5
+onnxruntime>=1.20
+numpy>=1.26
+scipy>=1.13
+soundfile>=0.12

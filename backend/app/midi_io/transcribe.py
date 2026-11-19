@@ -1,9 +1,13 @@
 """오디오(WAV 등) → 음표. Spotify Basic Pitch 모델(ONNX)로 음 높이 · 시작점을 읽고 음표로 묶는다.
 
 basic-pitch 패키지는 Windows · Python 3.13에서 tensorflow 2.15 이하를 요구해 설치되지 않아서,
-모델 파일(basic_pitch/nmp.onnx)만 onnxruntime으로 돌리고 창 나누기 · 음표 묶기는 여기 옮겨 왔다.
+모델 파일만 onnxruntime으로 돌리고 창 나누기 · 음표 묶기는 여기 옮겨 왔다.
 아래 _windows ~ _notes는 basic-pitch 0.4.0의 inference.py · note_creation.py를 옮긴 것이다
 (Copyright 2022 Spotify AB, Apache License 2.0 — basic_pitch/LICENSE · NOTICE). 피치 벤드는 앱에 담을 곳이 없어 뺐다.
+
+쓰는 모델은 basic_pitch/nmp_cowrite.onnx — 원래 nmp.onnx의 뒤쪽 합성곱 6층을 샘플팩 스타일 합성 루프로 이어서 학습한 것이다
+(그래프 · 크기 · 속도는 같고 가중치만 다르다, backend/train/transcriber · basic_pitch/CHANGES.md). 샘플팩 90곡에서 섞인 루프
+재현율 0.25 → 0.32, 조성 63 → 69/88 (docs/audio-to-midi.md). nmp.onnx는 학습의 출발점으로 남겨 둔다.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import numpy as np
 
 from app.models.project import Note, Project, Track
 
-MODEL_PATH = Path(__file__).parent / "basic_pitch" / "nmp.onnx"
+MODEL_PATH = Path(__file__).parent / "basic_pitch" / "nmp_cowrite.onnx"
 
 SAMPLE_RATE = 22050
 FFT_HOP = 256

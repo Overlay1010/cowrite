@@ -1,0 +1,5 @@
+banks/
+run*/
+smoke/
+venv/
+*.pt

@@ -18,7 +18,7 @@
 | 분야 | 기능 |
 | --- | --- |
 | **말로 편집** (도구 19개) | 조옮김 · 옥타브 · 퀀타이즈 · 세기 · 스윙 · 템포 · 음 지우기 · 음 길이(스타카토 · 레가토) · 마디 복사 · 반복 · 사람이 친 느낌(휴머나이즈) · 점점 세게/여리게 · 트랙 볼륨 · 팬 · 악기 · 드럼 킷 · 드럼 소리 하나씩 바꾸기 · 트랙 복제 · 코드에서 탑노트 · 베이스 라인 뽑기 |
-| **오디오 → MIDI** | WAV · FLAC · OGG · MP3 · AIFF를 열면 음을 읽어 MIDI 트랙으로 바꿔 연다 ([Basic Pitch](https://github.com/spotify/basic-pitch) 모델, 1분짜리가 약 2초). 템포는 파일 이름("98 BPM")에서, 없으면 열 때 묻고 모르면 소리로 짐작한다(샘플팩 루프 90곡 중 77곡). 음이 대부분 박에 붙어 있으면 16분 격자에 맞춘다. 여러 악기가 섞인 루프도 조성 · 코드는 미디로 읽은 것과 비슷하게 맞힌다(조성 88곡 중 63곡 · 미디로는 66곡, 박마다 코드 근음 중간 75%). 설계와 한계는 [docs/audio-to-midi.md](docs/audio-to-midi.md) |
+| **오디오 → MIDI** | WAV · FLAC · OGG · MP3 · AIFF를 열면 음을 읽어 MIDI 트랙으로 바꿔 연다 ([Basic Pitch](https://github.com/spotify/basic-pitch) 구조에 샘플팩 스타일 합성 루프로 직접 이어서 학습한 모델, 1분짜리가 약 2초). 템포는 파일 이름("98 BPM")에서, 없으면 열 때 묻고 모르면 소리로 짐작한다(샘플팩 루프 90곡 중 77곡). 음이 대부분 박에 붙어 있으면 16분 격자에 맞춘다. 여러 악기가 섞인 루프도 조성 · 코드는 미디로 읽은 것만큼 맞힌다(조성 88곡 중 69곡 · 미디로는 66곡, 박마다 코드 근음 중간 75%). 설계와 한계는 [docs/audio-to-midi.md](docs/audio-to-midi.md) |
 | **화성** | 조성 · 코드 분석(코드 띠: 코드 이름 · 로마숫자 · 화성 기능 색), "무슨 키야? · 9~12마디 코드 뭐야? · 여기 코드 뭐야?" · 리하모니 제안 3가지(가볍게 · 재지하게 · 색다르게, 멜로디와 세게 부딪히는 코드는 뺌) · 제안 카드를 눌러 코드 띠에서 비교 · "이걸로 바꾸기"로 건반 · 패드 · 베이스를 새 코드로(미리보기) |
 | **만들기** (v0.3 진행 중) | "패드 하나 깔아줘" — 곡의 코드를 읽어 새 트랙에 패드를 깐다 (곡 편성에 맞는 소리, 베이스와 멜로디 사이 음역, 코드끼리 덜 움직이게 이음) · "펑키한 드럼 깔아줘" — 실제 드러머 연주(Groove MIDI)에서 곡 템포에 맞는 루프를 찾아 깐다 (사람의 밀고 당김 · 같은 연주의 필인 그대로) · "드럼이랑 베이스, 패드 깔아줘 · 재즈풍으로 반주 전부" — 여러 파트를 계획표대로 한 번에 깔고 트랙끼리 점검해 계획 카드로 보여 준다 (멜로디만 있는 `samples/lofi_melody.mid`로 해 볼 수 있다) |
 | **내 샘플** | 원샷 WAV 폴더를 넣으면 종류(베이스 · 패드 · 건반 · 플럭 · 리드 · 벨)와 녹음된 음, 드럼이면 역할(킥 · 스네어 · 햇 …)을 알아내 트랙 · 드럼 레인마다 어울리는 샘플을 추천한다. 트랙 악기 메뉴 · 드럼 레인 메뉴에서 고르거나 "패드를 더 어두운 내 샘플로", "킥만 내 샘플로"라고 말한다. 루프는 리듬을 하이햇 MIDI로 옮기거나 오디오 트랙으로 그대로 깐다. 파일은 브라우저에만 저장(서버에 안 올림) |
@@ -127,7 +127,7 @@ compose_venv\Scripts\python -m eval.run --models claude-haiku-5-5,claude-sonnet-
 compose_venv\Scripts\python -m eval.harmony       # 화성 분석 엔진 (LLM 없음 · 무료)
 compose_venv\Scripts\python -m eval.harmony_llm   # LLM 단독 vs LLM + 엔진 (API 비용 발생)
 compose_venv\Scripts\python -m eval.harmony_agent # 실제 에이전트에게 샘플팩 조성 묻기 (API 비용 발생)
-compose_venv\Scripts\python -m eval.transcribe    # 오디오 → MIDI, 샘플팩의 wav · mid 짝 (LLM 없음 · samples/private 필요)
+compose_venv\Scripts\python -m eval.transcribe    # 오디오 → MIDI, 샘플팩의 wav · mid 짝 (LLM 없음 · samples/private 필요, 뒤에 모델.onnx를 주면 그 모델로)
 ```
 
 ## 샘플 MIDI
@@ -187,5 +187,5 @@ v0.1의 제한: 템포 · 박자 변화가 있으면 첫 값만 쓴다 (화면�
 
 | 쓰는 곳 | 데이터 | 라이선스 |
 | --- | --- | --- |
-| 오디오 → MIDI | [Basic Pitch](https://github.com/spotify/basic-pitch) (Spotify) 0.4.0의 모델 파일 `nmp.onnx`를 `backend/app/midi_io/basic_pitch/`에 그대로 담고(LICENSE · NOTICE 함께), 창 나누기 · 음표 묶기 코드를 `transcribe.py`로 옮겼다. Bittner et al., "A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch Estimation", ICASSP 2022 | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| 오디오 → MIDI | [Basic Pitch](https://github.com/spotify/basic-pitch) (Spotify) 0.4.0의 모델 파일 `nmp.onnx`를 `backend/app/midi_io/basic_pitch/`에 담고(LICENSE · NOTICE 함께), 창 나누기 · 음표 묶기 코드를 `transcribe.py`로 옮겼다. 앱이 쓰는 `nmp_cowrite.onnx`는 그 뒤쪽 층을 합성 루프로 이어서 학습해 바꾼 것이다(CHANGES.md, 학습 코드 `backend/train/transcriber` — 합성에 FluidR3 GM 녹음 사용). Bittner et al., "A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch Estimation", ICASSP 2022 | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | 드럼 만들기의 실제 연주 (록 · 붐뱁 · 로파이 · 팝 · 펑크 · 소울 · 재즈 · 라틴) | [Groove MIDI Dataset](https://magenta.tensorflow.org/datasets/groove) (Google LLC, Magenta) — 실제 드러머 연주 MIDI. `scripts/build_grooves.py`로 2 · 4마디 루프를 잘라 고르고 드럼 번호를 General MIDI로 바꿔 `backend/app/generate/grooves.json`에 담았다. Gillick et al., "Learning to Groove with Inverse Sequence Transformations", ICML 2019 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |

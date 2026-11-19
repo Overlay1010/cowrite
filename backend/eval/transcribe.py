@@ -1,4 +1,4 @@
-"""오디오 → MIDI 평가 (LLM 없음). `python -m eval.transcribe` (backend에서)
+"""오디오 → MIDI 평가 (LLM 없음). `python -m eval.transcribe [모델.onnx]` (backend에서, 모델을 주면 앱 모델 대신 그걸로)
 
 샘플팩(samples/private, 저장소에 없음)에서 같은 이름의 루프 wav와 mid를 짝지어 mid를 정답으로 쓴다.
 - 미디는 템포가 120으로 박힌 게 많아 박(틱 ÷ 해상도)으로 비교하고, 오디오는 초 × 이름의 BPM ÷ 60.
@@ -209,4 +209,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    if len(sys.argv) > 1:  # 학습한 체크포인트 재기 (backend/train/transcriber)
+        T.MODEL_PATH = Path(sys.argv[1])
+        T._session.cache_clear()
+    print(f"모델: {T.MODEL_PATH.name}\n")
     main()

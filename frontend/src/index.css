@@ -435,3 +435,14 @@ kbd { min-width: 24px; padding: 2px 7px; border-radius: 6px; border: 1px solid v
   .sample-row { grid-template-columns: 28px minmax(0, 1fr) 92px 56px 28px; }
   .sample-row .sample-meta { display: none; }
 }
+
+/* ---------- 오디오 템포 묻기 ---------- */
+.tempo-ask {
+  position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100% - 32px));
+  padding: 18px; display: flex; flex-direction: column; gap: 14px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.tempo-ask h2 { font-size: 15px; margin: 0 0 6px; }
+.tempo-ask .hint { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.tempo-ask-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
+.tempo-ask-field input { width: 120px; }
+.tempo-ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

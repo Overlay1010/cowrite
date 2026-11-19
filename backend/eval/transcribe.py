@@ -8,6 +8,7 @@
 - 코드: 정답 mid와 변환 결과를 같은 화성 분석(app/harmony)으로 읽어 박마다 근음이 같은 비율 (완성 루프 · 가장 맞는 stem).
 - 조성: 변환한 완성 루프 / 정답 mid를 같은 엔진으로 읽어 이름의 조와 비교.
 - 템포: 이름의 BPM을 가리고 짐작한 값. 루프가 아닌 녹음 대신 완성 루프의 끝을 잘라(70%) · 앞을 잘라(0.3마디) 다시 바꿔 본다.
+- 앱과 같게 이름의 템포로 16분 격자에 맞춘 뒤 잰다(대부분 격자에 붙은 파일만 맞춘다).
 - 음표 묶기를 고칠 때는 곡 이름으로 나눈 A/B 두 묶음에서 모두 오르는지 본다 (한쪽에 맞춘 조정 막기).
 """
 
@@ -113,7 +114,7 @@ def main() -> None:
     keys: dict[str, Counter] = {"audio": Counter(), "midi": Counter()}
     tempo: dict[str, Counter] = {"원본": Counter(), "끝 자름": Counter(), "앞 자름": Counter()}
     seconds = spent = 0.0
-    songs = 0
+    songs = snapped_files = 0
     for mid, wav in found:
         bpm, want = T.bpm_from_name(wav.stem), key_of_name(wav.stem)
         if not bpm:
@@ -142,7 +143,8 @@ def main() -> None:
 
         audio = T.load_audio(wav.read_bytes())
         tr = run(audio)
-        events = tr.events
+        events, snapped = T.quantize(tr.events, bpm)  # 앱과 같게: 이름의 템포로 16분 격자에 (대부분 격자에 붙은 파일만)
+        snapped_files += snapped
         est = [(e.start * bpm / 60, e.pitch) for e in events]
         mix_rec.append(match(ref, est, tol)[2])
         mix_rec_pc.append(match([(s, p % 12) for s, p in ref], [(s, p % 12) for s, p in est], tol)[2])
@@ -164,7 +166,7 @@ def main() -> None:
         best = best_oct = (0.0, 0.0, 0.0)
         best_events: list[T.NoteEvent] = []
         for s in stems:
-            ev = run(T.load_audio(s.read_bytes())).events
+            ev = T.quantize(run(T.load_audio(s.read_bytes())).events, bpm)[0]
             e = [(x.start * bpm / 60, x.pitch) for x in ev if x.start * bpm / 60 <= end]
             m = match(ref, e, tol)
             if m > best:
@@ -191,6 +193,7 @@ def main() -> None:
     print(f"| └ 정밀도 · 재현율 (중간) | {len(stem_f1)} | {np.median(stem_p):.2f} · {np.median(stem_r):.2f} |")
     print(f"| └ 묶음 A · B 평균 | {len(f1_by_group['A'])} · {len(f1_by_group['B'])} | {np.mean(f1_by_group['A']):.3f} · {np.mean(f1_by_group['B']):.3f} |")
     print(f"| 악기별 stem, 옥타브를 옮겨 맞춘 F1 | {len(stem_f1)} | {pct(stem_f1_oct)} |")
+    print(f"| 16분 격자에 맞춘 완성 루프 | {songs} | {snapped_files}곡 |")
     print(f"| 코드 근음이 정답과 같은 박 (완성 루프) | {len(chords['mix'])} | {pct(chords['mix'])} |")
     print(f"| 코드 근음이 정답과 같은 박 (가장 맞는 stem) | {len(chords['stem'])} | {pct(chords['stem'])} |")
     for k, c in keys.items():

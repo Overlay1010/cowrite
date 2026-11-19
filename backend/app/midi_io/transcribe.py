@@ -33,11 +33,19 @@ HOP = WINDOW_SAMPLES - OVERLAP
 MIDI_OFFSET = 21  # 출력 0번 칸 = A0
 N_PITCHES = 88
 
-# Basic Pitch 기본값
+# Basic Pitch 기본값. 시작점 문턱 0.6은 악기 하나짜리 stem F1을 올리지만(0.26 · 0.28 → 0.28 · 0.32) 여러 악기가 섞인
+# 루프의 재현율 · 코드 근음을 깎아서(중간 0.15 → 0.11 · 0.75 → 0.70) 그대로 둔다. 쪼개진 음 합치기 · 같이 시작한 배음 빼기도
+# 0.5에서는 효과가 없어 넣지 않았다 (docs/audio-to-midi.md).
 ONSET_THRESHOLD = 0.5
 FRAME_THRESHOLD = 0.3
 MIN_NOTE_MS = 127.7
 ENERGY_TOL = 11
+
+# 격자 맞춤: 시작점의 GRID_NEED 이상이 이미 16분 격자 ±0.25칸 안인 파일만, ±GRID_WINDOW칸 안의 시작 · 끝을 격자로.
+# 스윙 · 셋잇단 · 자유로운 연주는 이 검사에 안 걸려 그대로 두고, 템포를 잘못 짐작했을 때도 대개 안 걸린다.
+# 샘플팩 90곡 중 34곡을 맞추고 점수(음 · 코드 · 조성)는 그대로다.
+GRID_NEED = 0.6
+GRID_WINDOW = 0.3
 
 MAX_SECONDS = 10 * 60
 
@@ -225,6 +233,28 @@ def transcribe_audio(audio: np.ndarray) -> Transcription:
     return Transcription(sorted(events, key=lambda n: (n.start, n.pitch)), env, times, len(audio) / SAMPLE_RATE)
 
 
+def quantize(events: list[NoteEvent], bpm: float) -> tuple[list[NoteEvent], bool]:
+    """16분 격자에 맞춘다 — 시작점이 이미 대부분 격자 가까이 있는 파일만. (음들, 맞췄는지)"""
+    step = 15 / bpm
+    if not events:
+        return events, False
+    near = sum(abs(e.start / step - round(e.start / step)) <= 0.25 for e in events)
+    if near < GRID_NEED * len(events):
+        return events, False
+
+    def snap(t: float) -> float:
+        g = round(t / step) * step
+        return g if abs(t - g) <= GRID_WINDOW * step else t
+
+    out: dict[tuple[int, int], NoteEvent] = {}
+    for e in sorted(events, key=lambda n: (n.start, -n.amplitude)):
+        s, en = snap(e.start), snap(e.end)
+        if en <= s:
+            en = s + step
+        out.setdefault((round(s / step * 4), e.pitch), NoteEvent(s, en, e.pitch, e.amplitude))  # 같은 자리 · 같은 음은 하나로
+    return sorted(out.values(), key=lambda n: (n.start, n.pitch)), True
+
+
 def transcribe(audio: np.ndarray) -> list[NoteEvent]:
     return transcribe_audio(audio).events
 
@@ -320,8 +350,11 @@ def audio_bytes_to_project(data: bytes, name: str, bpm: float | None = None) -> 
             events = align_to_beat(events, bpm, phase)
             warnings.append(
                 f"템포를 소리에서 짐작했어요({bpm:g} BPM). 들리는 박자는 그대로지만, 틀렸다면 마디 줄이 어긋나 보여요. "
-                "파일 이름에 '120 BPM'처럼 템포를 넣어 다시 열면 그 템포로 읽어요."
+                "다시 열 때 템포를 넣거나 파일 이름에 '120 BPM'처럼 넣으면 그 템포로 읽어요."
             )
+    events, snapped = quantize(events, bpm)
+    if snapped:
+        warnings[0] += " 음 시작 · 끝은 16분 격자에 맞췄어요."
     return events_to_project(events, name, bpm, warnings)
 
 

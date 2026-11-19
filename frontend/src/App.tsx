@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { PianoRoll } from './components/PianoRoll'
 import { ShortcutHelp } from './components/ShortcutHelp'
+import { TempoAsk } from './components/TempoAsk'
 import { SamplePack } from './components/SamplePack'
 import { useSamplePack } from './store/samplePack'
 import { TopBar } from './components/TopBar'
@@ -83,6 +84,7 @@ export default function App() {
       </main>
       <VersionPanel />
       <ShortcutHelp />
+      <TempoAsk />
       <SamplePack />
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">

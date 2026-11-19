@@ -20,7 +20,14 @@ interface ProjectState {
   /** 적용 · 취소 · 되돌리기 요청 중 */
   busy: boolean
   error: string | null
-  upload: (file: File) => Promise<void>
+  /**
+   * MIDI · 오디오를 연다. 이름에 템포가 없는 오디오는 먼저 템포를 묻는다(askTempo에 담아 두고 끝).
+   * bpm을 주면 그 템포로, null이면 묻지 않고 소리로 짐작한다.
+   */
+  upload: (file: File, bpm?: number | null) => Promise<void>
+  /** 템포를 물어보는 중인 오디오 파일 */
+  askTempo: File | null
+  cancelAskTempo: () => void
   /** 저장된 프로젝트를 다시 연다. 화면에 그릴 대화 기록을 돌려준다 (실패하면 null) */
   open: (projectId: string) => Promise<LogEntry[] | null>
   /** 프로젝트를 닫고 처음 화면으로 (저장돼 있어서 다시 열 수 있다) */
@@ -114,10 +121,17 @@ export const useProject = create<ProjectState>((set, get) => {
     busy: false,
     error: null,
 
-    upload: async (file) => {
-      set({ loading: true, error: null })
+    askTempo: null,
+    cancelAskTempo: () => set({ askTempo: null }),
+
+    upload: async (file, bpm) => {
+      if (bpm === undefined && api.AUDIO_TO_MIDI.test(file.name) && api.bpmFromName(file.name) === null) {
+        set({ askTempo: file, error: null })
+        return
+      }
+      set({ loading: true, error: null, askTempo: null })
       try {
-        const project = await api.uploadMidi(file)
+        const project = await api.uploadMidi(file, bpm ?? undefined)
         set({
           project,
           preview: null,

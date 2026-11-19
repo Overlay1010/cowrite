@@ -32,10 +32,18 @@ export const AUDIO_TO_MIDI = /\.(wav|flac|ogg|mp3|aiff?)$/i
 export const OPENABLE_ACCEPT = '.mid,.midi,.wav,.flac,.ogg,.mp3,.aif,.aiff'
 export const isOpenable = (f: File) => /\.midi?$/i.test(f.name) || AUDIO_TO_MIDI.test(f.name)
 
-/** MIDI를 열거나 오디오를 음표로 바꿔 연다 */
-export async function uploadMidi(file: File): Promise<Project> {
+/** 파일 이름의 템포 ('Mango - 98 BPM F Min' → 98). 서버 transcribe.bpm_from_name과 같은 규칙 */
+export function bpmFromName(name: string): number | null {
+  const m = /(?<!\d)(\d{2,3}(?:\.\d+)?)\s*bpm/i.exec(name)
+  const bpm = m ? Number(m[1]) : NaN
+  return bpm >= 40 && bpm <= 300 ? bpm : null
+}
+
+/** MIDI를 열거나 오디오를 음표로 바꿔 연다 (bpm: 오디오를 이 템포로 읽기, 없으면 이름 → 짐작) */
+export async function uploadMidi(file: File, bpm?: number): Promise<Project> {
   const form = new FormData()
   form.append('file', file)
+  if (bpm !== undefined) form.append('bpm', String(bpm))
   return parse<Project>(await fetch(`${BASE}/projects`, { method: 'POST', body: form }))
 }
 

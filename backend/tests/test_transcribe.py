@@ -92,6 +92,20 @@ def test_estimate_bpm_for_recording_not_cut_to_bars():
     assert np.median(off) < 0.15
 
 
+def N(start: float, end: float, pitch: int, amp: float) -> T.NoteEvent:
+    return T.NoteEvent(start=start, end=end, pitch=pitch, amplitude=amp)
+
+
+def test_quantize_only_when_mostly_on_the_grid():
+    step = 15 / 120  # 120 BPM 16분
+    loose = [N(i * step + d, i * step + step * 0.9, 60, 0.5) for i, d in enumerate([0.01, -0.02, 0.015, 0, -0.01, 0.02, 0.03, -0.012])]
+    got, snapped = T.quantize(loose, 120)
+    assert snapped and all(abs(e.start / step - round(e.start / step)) < 1e-9 for e in got)
+    triplets = [N(i * 0.5 / 3, i * 0.5 / 3 + 0.1, 60, 0.5) for i in range(12)]  # 8분 셋잇단: 16분 격자에 안 붙음
+    got, snapped = T.quantize(triplets, 120)
+    assert not snapped and got == triplets
+
+
 def test_upload_wav_opens_as_project(client):
     data = render(ARP, 120, 16, channels=2)
     r = client.post("/api/v1/projects", files={"file": ("Arp - 120 BPM.wav", data, "audio/wav")})
@@ -100,6 +114,10 @@ def test_upload_wav_opens_as_project(client):
     assert p["tempo"] == 120 and p["name"] == "Arp - 120 BPM"
     assert len(p["tracks"]) == 1 and len(p["tracks"][0]["notes"]) >= 15
     assert "오디오에서" in p["warnings"][0] and len(p["warnings"]) == 1
+    assert "격자" in p["warnings"][0]  # 4분음표 펼침화음이라 16분 격자에 맞춤
+    played = {(pitch, float(b)) for pitch, b, _ in ARP}
+    hits = [n for n in p["tracks"][0]["notes"] if (n["pitch"], round(n["start"])) in played]
+    assert len(hits) >= 15 and all(n["start"] == round(n["start"]) for n in hits)  # 친 음은 박 위에 정확히
 
 
 def test_upload_wav_without_bpm_guesses_and_says_so(client):

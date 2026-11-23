@@ -159,3 +159,15 @@ def test_harmony_eval_scoring():
     am7 = Truth(0, 4, 9, "m7")
     assert same_tones(0, "6", am7)  # Am7 = C6 (같은 음)
     assert not same_tones(0, "maj7", am7)
+
+
+def test_label_check_reasons():
+    """오디오 → MIDI 평가에서 정답 mid가 소리와 안 맞는 곡을 가리는 규칙 (eval/labels.py)."""
+    from eval.labels import _f1, reasons_of
+
+    assert reasons_of(0.6, 0.6, 0.0, 0.6, 0, 0.1) == []
+    assert reasons_of(0.1, 0.4, -4.0, 0.4, 0, 0.1) == ["자리 어긋남"]
+    assert reasons_of(0.3, 0.32, -4.0, 0.32, 0, 0.1) == []  # 조금 오른 건 우연일 수 있어 문제로 안 친다
+    assert reasons_of(0.2, 0.2, 0.0, 0.5, 12, 0.1) == ["조 · 옥타브 다름"]
+    assert reasons_of(0.0, 0.0, 0.0, 0.0, 0, 0.8) == ["안 들림"]
+    assert _f1([(0.0, 60), (1.0, 62)], [(0.02, 60), (1.0, 64)], 0.05) == 0.5

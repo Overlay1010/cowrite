@@ -1,6 +1,8 @@
 """오디오 → MIDI 평가 (LLM 없음). `python -m eval.transcribe [모델.onnx]` (backend에서, 모델을 주면 앱 모델 대신 그걸로)
 
 샘플팩(samples/private, 저장소에 없음)에서 같은 이름의 루프 wav와 mid를 짝지어 mid를 정답으로 쓴다.
+- 정답 mid가 소리와 안 맞는 곡(파트가 stem에 없음 · 루프의 다른 자리 · 옥타브나 조가 옮겨짐)을 원래 Basic Pitch로 먼저 가려
+  (eval/labels.py) stem 지표는 정답이 맞는 곡만을 주 지표로, 모든 곡은 앞선 기록과 비교용으로 함께 낸다.
 - 미디는 템포가 120으로 박힌 게 많아 박(틱 ÷ 해상도)으로 비교하고, 오디오는 초 × 이름의 BPM ÷ 60.
 - 완성 루프 wav는 여러 악기가 섞이고 mid는 그중 한 악기라서 정답 음을 찾은 비율(재현율)만 본다.
 - 같은 폴더의 악기별 stem wav는 하나씩 바꿔 mid와 가장 잘 맞는 stem의 F1 (mid 길이 안 음표만).
@@ -29,6 +31,7 @@ from app.models.project import Note, Project, Track
 from app.midi_io import transcribe as T
 from app.midi_io.convert import MidiParseError, midi_bytes_to_project
 from eval.harmony import MIREX, key_relation
+from eval.labels import judge_all
 
 PRIVATE = Path(__file__).resolve().parents[2] / "samples" / "private"
 TOL_SECONDS = 0.05  # 시작점이 이 안이면 맞음 (mir_eval 기본값)
@@ -103,20 +106,15 @@ def chord_roots_agree(ref: Project, got: Project, end: float) -> float | None:
     return same / n if n else None
 
 
-def main() -> None:
-    found = pairs(PRIVATE) if PRIVATE.exists() else []
-    if not found:
-        print("samples/private에 같은 이름의 wav · mid 짝이 없어 건너뜀")
-        return
-    mix_rec, mix_rec_pc, stem_f1, stem_f1_oct, stem_p, stem_r = [], [], [], [], [], []
-    chords: dict[str, list[float]] = {"mix": [], "stem": []}
-    f1_by_group: dict[str, list[float]] = {"A": [], "B": []}
-    keys: dict[str, Counter] = {"audio": Counter(), "midi": Counter()}
-    tempo: dict[str, Counter] = {"원본": Counter(), "끝 자름": Counter(), "앞 자름": Counter()}
-    seconds = spent = 0.0
-    songs = snapped_files = 0
+def stems_of(mid: Path) -> list[Path]:
+    return sorted(s for s in mid.parent.glob("*.wav") if not s.name.startswith("._"))
+
+
+def songs_of(found: list[tuple[Path, Path]]) -> list[tuple[Path, Path, float, Project, list[Note]]]:
+    """(mid, wav, 이름의 BPM, 정답 프로젝트, 드럼 뺀 정답 음표) — 이름에 BPM이 없거나 음이 없는 짝은 뺀다."""
+    out = []
     for mid, wav in found:
-        bpm, want = T.bpm_from_name(wav.stem), key_of_name(wav.stem)
+        bpm = T.bpm_from_name(wav.stem)
         if not bpm:
             continue
         try:
@@ -124,9 +122,33 @@ def main() -> None:
         except MidiParseError:
             continue
         ref_notes = [n for t in midi_project.tracks if not t.is_drum for n in t.notes]
+        if ref_notes:
+            out.append((mid, wav, bpm, midi_project, ref_notes))
+    return out
+
+
+def main() -> None:
+    found = pairs(PRIVATE) if PRIVATE.exists() else []
+    if not found:
+        print("samples/private에 같은 이름의 wav · mid 짝이 없어 건너뜀")
+        return
+    songs_list = songs_of(found)
+    verdicts = judge_all(
+        [(mid, [(n.start, n.duration, n.pitch) for n in notes], stems_of(mid), bpm, TOL_SECONDS * bpm / 60) for mid, _, bpm, _, notes in songs_list],
+        _long(PRIVATE) / ".label_check.json",
+    )
+    mix_rec, mix_rec_pc, stem_f1, stem_f1_oct, stem_p, stem_r = [], [], [], [], [], []
+    chords: dict[str, list[float]] = {"mix": [], "stem": []}
+    f1_by_group: dict[str, list[float]] = {"A": [], "B": []}
+    clean: dict[str, list[float]] = {"stem": [], "oct": [], "mix": [], "chord": [], "A": [], "B": []}
+    keys: dict[str, Counter] = {"audio": Counter(), "midi": Counter()}
+    tempo: dict[str, Counter] = {"원본": Counter(), "끝 자름": Counter(), "앞 자름": Counter()}
+    seconds = spent = 0.0
+    songs = snapped_files = 0
+    for mid, wav, bpm, midi_project, ref_notes in songs_list:
+        want = key_of_name(wav.stem)
         ref = sorted((n.start, n.pitch) for n in ref_notes)
-        if not ref:
-            continue
+        ok = verdicts[str(mid)].clean
         songs += 1
         tol = TOL_SECONDS * bpm / 60
         end = max(n.start + n.duration for n in ref_notes) + tol
@@ -162,7 +184,7 @@ def main() -> None:
             keys["audio"][key_relation((audio_key.tonic, audio_key.mode), want)] += 1
             keys["midi"][key_relation((midi_key.tonic, midi_key.mode), want)] += 1
 
-        stems = [s for s in mid.parent.glob("*.wav") if not s.name.startswith("._")]
+        stems = stems_of(mid)
         best = best_oct = (0.0, 0.0, 0.0)
         best_events: list[T.NoteEvent] = []
         for s in stems:
@@ -179,12 +201,33 @@ def main() -> None:
             stem_r.append(best[2])
             stem_f1_oct.append(best_oct[0])
             f1_by_group[group(wav.stem)].append(best[0])
-            if best_events and (c := chord_roots_agree(ref_project, T.events_to_project(best_events, "s", bpm, []), end)) is not None:
-                chords["stem"].append(c)
+            sc = chord_roots_agree(ref_project, T.events_to_project(best_events, "s", bpm, []), end) if best_events else None
+            if sc is not None:
+                chords["stem"].append(sc)
+            if ok:
+                clean["stem"].append(best[0])
+                clean["oct"].append(best_oct[0])
+                clean["mix"].append(mix_rec[-1])
+                clean[group(wav.stem)].append(best[0])
+                if sc is not None:
+                    clean["chord"].append(sc)
         print(f"  {songs:3d} {wav.stem[:60]}", file=sys.stderr, flush=True)
 
     print("## 오디오 → MIDI 평가\n")
     print(f"샘플팩 루프 {songs}곡 (같은 이름의 wav · mid 짝, 이름에 BPM), 시작점 ±{TOL_SECONDS * 1000:.0f}ms · 같은 음이면 맞음. 값은 25% · 중간 · 75% | 평균\n")
+    why = Counter(r for v in verdicts.values() for r in v.reasons)
+    n_stem = sum("stem 없음" not in v.reasons for v in verdicts.values())
+    print(f"정답 확인 (원래 Basic Pitch로, eval/labels.py): stem 있는 {n_stem}곡 중 정답이 소리와 맞는 곡 {len(clean['stem'])} — "
+          + " · ".join(f"{r} {why[r]}" for r in ("안 들림", "자리 어긋남", "조 · 옥타브 다름")) + " (한 곡이 여럿에 걸리기도)\n")
+    print("**주 지표 — 정답이 소리와 맞는 곡만**\n")
+    print("| 무엇 | 곡 | 값 |")
+    print("|---|---|---|")
+    print(f"| 악기별 stem 중 가장 맞는 것 F1 | {len(clean['stem'])} | {pct(clean['stem'])} |")
+    print(f"| └ 묶음 A · B 평균 | {len(clean['A'])} · {len(clean['B'])} | {np.mean(clean['A']):.3f} · {np.mean(clean['B']):.3f} |")
+    print(f"| 악기별 stem, 옥타브를 옮겨 맞춘 F1 | {len(clean['oct'])} | {pct(clean['oct'])} |")
+    print(f"| 완성 루프: 정답 음을 찾은 비율 | {len(clean['mix'])} | {pct(clean['mix'])} |")
+    print(f"| 코드 근음이 정답과 같은 박 (가장 맞는 stem) | {len(clean['chord'])} | {pct(clean['chord'])} |")
+    print("\n**모든 곡** (정답이 소리와 안 맞는 곡 포함 — 앞선 기록과 비교용)\n")
     print("| 무엇 | 곡 | 값 |")
     print("|---|---|---|")
     print(f"| 완성 루프: 정답 음을 찾은 비율 | {len(mix_rec)} | {pct(mix_rec)} |")

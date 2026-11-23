@@ -323,8 +323,9 @@ def load_banks(folder: Path) -> None:
             _BANKS.append(bank)
 
 
-def make_loop(rng) -> tuple[np.ndarray, list[tuple[float, float, int]]]:
-    bpm, seconds, parts = make_music(rng)
+def make_loop(rng, music=None) -> tuple[np.ndarray, list[tuple[float, float, int]]]:
+    """music: (rng) → (bpm, 초, 파트) — 없으면 make_music(무작위 곡)."""
+    bpm, seconds, parts = (music or make_music)(rng)
     n = int(seconds * SR)
     mix = np.zeros(n + SR, dtype=np.float32)
     labels = []

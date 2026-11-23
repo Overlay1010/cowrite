@@ -57,8 +57,24 @@ def labels_for(notes, start_s: float):
 
 
 class Loops(IterableDataset):
-    def __init__(self, seed: int, banks: str | None, share: float = 0.5):
+    """합성 루프(synth_data). surge: surge_render.py로 미리 렌더한 폴더(surge_share 비율), cym: cymatics_data 목록에서
+    A 묶음 실제 stem(real 비율)."""
+
+    def __init__(self, seed: int, banks: str | None, share: float = 0.5, surge: str | None = None, surge_share: float = 0.0,
+                 cym: str | None = None, real: float = 0.0):
         self.seed, self.banks, self.share = seed, banks, share
+        self.surge, self.surge_share, self.cym, self.real = surge, surge_share, cym, real
+
+    def _loop(self, rng):
+        r = rng.random()
+        if self.cym and r < self.real:
+            import cymatics_data as C
+
+            return C.real_loop(rng, SR)
+        if self.surge_files and r < self.real + self.surge_share:
+            z = np.load(self.surge_files[int(rng.integers(0, len(self.surge_files)))])
+            return z["audio"].astype(np.float32), [(float(s), float(e), int(p)) for s, e, p in z["labels"]]
+        return G.make_loop(rng)
 
     def __iter__(self):
         info = torch.utils.data.get_worker_info()
@@ -67,8 +83,13 @@ class Loops(IterableDataset):
         G.SAMPLED_SHARE = self.share  # 작업자는 새 프로세스라 여기서 정한다
         if self.banks and not G._BANKS:
             G.load_banks(Path(self.banks))
+        self.surge_files = sorted(Path(self.surge).glob("*.npz")) if self.surge else []
+        if self.cym:
+            import cymatics_data as C
+
+            C.load(Path(self.cym))
         while True:
-            audio, notes = G.make_loop(rng)
+            audio, notes = self._loop(rng)
             # 루프 하나에서 창 2개
             for _ in range(2):
                 if len(audio) <= WIN:
@@ -108,6 +129,10 @@ def main():
     ap.add_argument("--resume", default=None)
     ap.add_argument("--train_only", default="", help="이 이름 조각이 든 파라미터만 학습 (쉼표로)")
     ap.add_argument("--sampled_share", type=float, default=0.5)
+    ap.add_argument("--surge", default=None, help="surge_render.py가 렌더한 폴더")
+    ap.add_argument("--surge_share", type=float, default=0.0)
+    ap.add_argument("--cym", default=None, help="cymatics_data.py 목록 (A 묶음 실제 stem)")
+    ap.add_argument("--real", type=float, default=0.0)
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -129,7 +154,7 @@ def main():
     params = [p for p in model.parameters() if p.requires_grad]
     print("학습할 파라미터", sum(p.numel() for p in params), flush=True)
     opt = torch.optim.Adam(params, lr=args.lr)
-    dl = DataLoader(Loops(1, args.banks, args.sampled_share), batch_size=args.batch, num_workers=args.workers, persistent_workers=True)
+    dl = DataLoader(Loops(1, args.banks, args.sampled_share, args.surge, args.surge_share, args.cym, args.real), batch_size=args.batch, num_workers=args.workers, persistent_workers=True)
     t0 = time.time()
     run = {"note": 0.0, "onset": 0.0, "contour": 0.0}
     for step, (x, n, o, c) in enumerate(dl, start=1):

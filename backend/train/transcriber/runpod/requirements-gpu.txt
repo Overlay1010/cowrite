@@ -1,0 +1,9 @@
+# RunPod PyTorch 템플릿에 torch(CUDA)는 이미 있다
+onnx>=1.17
+onnx2torch>=1.5
+onnxruntime>=1.20
+numpy>=1.26
+scipy>=1.13
+soundfile>=0.12
+pretty_midi>=0.2.10
+pyyaml>=6

@@ -210,9 +210,16 @@ def export(full: Full, path: Path) -> None:
 def cpu_count() -> int:
     """컨테이너에 실제로 주어진 CPU 수. RunPod은 os.cpu_count()가 서버 전체(48)를 보여 주고 cgroup으로 6.8개만 준다."""
     try:
-        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()  # cgroup v2
         if quota != "max":
             return max(1, int(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    try:  # cgroup v1 (서버에 따라 이쪽 — 그대로 두면 128개로 본다)
+        quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+        period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+        if quota > 0:
+            return max(1, quota // period)
     except (OSError, ValueError):
         pass
     return os.cpu_count() or 1

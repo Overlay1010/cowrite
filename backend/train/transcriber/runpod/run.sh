@@ -12,7 +12,7 @@ DATA=""
 ls $W/surge_clean/*.npz >/dev/null 2>&1 && DATA="$DATA --surge $W/surge_clean --surge_share 0.3"
 echo "데이터:${DATA:- 합성 루프만}"
 COMMON="--base ../../app/midi_io/basic_pitch/nmp_cowrite.onnx --banks $W/banks $DATA \
-  --batch ${BATCH:-64} --workers ${WORKERS:-$(( $(nproc) - 2 ))} --lr ${LR:-3e-4}"
+  --batch ${BATCH:-64} --workers ${WORKERS:-$(( $(python -c "import big; print(big.cpu_count())") - 1 ))} --lr ${LR:-3e-4}"
 if [ "${SMOKE:-0}" = 1 ]; then
   python big.py $COMMON --out $W/runs/smoke --steps 200 --save_every 100 2>&1 | grep -v Warning | tee $W/runs/smoke.log
 else

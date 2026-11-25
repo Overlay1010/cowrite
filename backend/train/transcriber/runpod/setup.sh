@@ -9,7 +9,8 @@ cd $W
 [ -d cowrite ] || git clone -b develop https://github.com/Overlay1010/cowrite.git
 cd cowrite/backend/train/transcriber
 git pull -q || true
-pip install -q -r runpod/requirements-gpu.txt
+# Ubuntu 24.04 이미지는 시스템 pip를 막는다(PEP 668). 컨테이너 전용 Python이라 허용
+PIP_BREAK_SYSTEM_PACKAGES=1 PIP_ROOT_USER_ACTION=ignore pip install -q -r runpod/requirements-gpu.txt
 [ -d $W/banks ] || python fetch_samples.py $W/banks
 echo "패키지 준비 끝 $(date +%H:%M)"
 

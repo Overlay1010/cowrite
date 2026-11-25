@@ -161,16 +161,18 @@ class Big(nn.Module):
         b = hcqt.shape[0]
         x = torch.cat([hcqt.permute(0, 3, 1, 2), contour.unsqueeze(1)], 1)  # B,9,T,264
         x = self.conv(x)  # B,2ch,T,88
-        nl, ol = logit(note_p), logit(onset_p)
+        # bf16에서는 1 - 1e-4가 1로 반올림돼 log(0) → nan. 로짓과 마지막 합은 fp32로
+        nl, ol = logit(note_p.float()), logit(onset_p.float())
         x = torch.cat([x, nl.unsqueeze(1), ol.unsqueeze(1)], 1)  # B,c,T,88
         s = self.squeeze(x).permute(0, 2, 1, 3).reshape(b, FRAMES, -1)
         h = self.tf(self.proj(s) + self.pos)  # B,T,d
         g = self.global_head(h).view(b, FRAMES, 2, 88)
         back = self.back(h).view(b, FRAMES, 2, 88).permute(0, 2, 1, 3)  # B,2,T,88
         loc = self.local_head(torch.cat([x, back], 1))  # B,2,T,88
-        note = nl + g[:, :, 0] + loc[:, 0]
-        onset = ol + g[:, :, 1] + loc[:, 1]
-        return torch.sigmoid(onset), torch.sigmoid(note)
+        with torch.autocast(hcqt.device.type, enabled=False):
+            note = nl + g[:, :, 0].float() + loc[:, 0].float()
+            onset = ol + g[:, :, 1].float() + loc[:, 1].float()
+            return torch.sigmoid(onset), torch.sigmoid(note)
 
 
 class Full(nn.Module):
@@ -181,8 +183,9 @@ class Full(nn.Module):
         self.base, self.big = base, big
 
     def forward(self, audio):
-        with torch.no_grad():
-            onset_p, note_p, contour, hcqt = self.base(audio)
+        # 고정된 Basic Pitch(CQT 포함)는 bf16이면 정밀도가 떨어져 fp32로 돌린다 (학습하지 않아 비용이 작다)
+        with torch.no_grad(), torch.autocast(audio.device.type, enabled=False):
+            onset_p, note_p, contour, hcqt = self.base(audio.float())
         onset, note = self.big(hcqt, contour, note_p, onset_p)
         return onset, note, contour
 
@@ -202,6 +205,17 @@ def export(full: Full, path: Path) -> None:
     )
     full.to(device)
     full.big.train()
+
+
+def cpu_count() -> int:
+    """컨테이너에 실제로 주어진 CPU 수. RunPod은 os.cpu_count()가 서버 전체(48)를 보여 주고 cgroup으로 6.8개만 준다."""
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            return max(1, int(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    return os.cpu_count() or 1
 
 
 def main():
@@ -231,7 +245,7 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    torch.set_num_threads(max(1, os.cpu_count() - args.workers))
+    torch.set_num_threads(max(1, cpu_count() - args.workers))
 
     device = torch.device(args.device)
     full = Full(frozen_base(args.base), Big(args.ch, args.d, args.layers))

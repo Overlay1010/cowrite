@@ -14,7 +14,7 @@
 | `cymatics_data.py` | 구매한 샘플팩(samples/private)의 A 묶음만 학습 목록으로 (B는 평가용으로 남김). 이 PC에서만 쓰고 RunPod에는 올리지 않는다 |
 | `big.py` | Basic Pitch 위에 보정층(합성곱 + 트랜스포머, 267만 개)을 얹은 큰 모델. 처음엔 Basic Pitch와 같은 출력에서 출발. GPU · bf16, `--slakh` · `--surge`, `--max_minutes`로 시간 상한 |
 | `slakh_data.py` | Slakh2100(CC BY 4.0) → 곡마다 전체 믹스 + 악기 1~3개 작은 묶음 (22050Hz int16 .npy + 정답), 학습 중 메모리 매핑으로 구간만 읽음 |
-| `runpod/` | RunPod GPU에서: `setup.sh`(코드 · 패키지 · Slakh 받으면서 풀기 · 변환) → `SMOKE=1 run.sh`(200걸음) → `run.sh`(본 학습) |
+| `runpod/` | RunPod GPU에서: `setup.sh`(코드 · 패키지 · Slakh 받으면서 풀기 · 변환) → `SMOKE=1 run.sh`(200걸음) → `run.sh`(본 학습). 이 PC에서는 `watch.py`가 몇 분마다 체크포인트 · 로그를 `runs_gpu/`로 받아 오고, 잔액이 바닥에 가까우면 다 받은 뒤 Pod를 지운다 |
 
 ```bash
 python -m venv venv && venv\Scripts\pip install -r requirements.txt   # Python 3.12에서 확인
@@ -38,8 +38,11 @@ python surge_render.py render "<Surge Synth Team>" surge_presets.json surge_clea
 bash runpod/setup.sh            # 받는 게 느리면 MAX_GB=30 bash runpod/setup.sh (앞쪽 곡만)
 SMOKE=1 bash runpod/run.sh      # 한 걸음 시간 확인
 MAX_MIN=480 bash runpod/run.sh  # 본 학습, 1000걸음마다 저장
+# 이 PC: 학습하는 동안 계속 켜 둔다 (결과가 이 PC에 쌓여 Pod가 지워져도 남음)
+python runpod/watch.py <pod-id> --ssh "root@IP -p PORT" --floor 2
 ```
 
 - Slakh 출처: Manilow et al., "Cutting Music Source Separation Some Slakh: A Dataset to Study the Impact of Training Data Quality and Quantity", WASPAA 2019 (CC BY 4.0).
+- 2026-11-25 RunPod 짧은 시험(공용 RTX 4090, 캐나다): 200걸음 21초(한 걸음 약 0.1초, 배치 64), `watch.py`가 체크포인트를 받아 오고 앱 변환 코드가 그대로 읽음. GPU에서만 나던 손실 nan(bf16에서 1 - 1e-4 → 1)과 CPU 수 오인(48개로 보고 실제 6.8개)을 고침. Zenodo 받는 속도는 초당 0.3~5MB로 들쭉날쭉.
 - BabySlakh(앞 20곡)로 이 PC에서 확인: 변환 20곡 33초 · 411MB, 정답 시작점과 모델 시작점 차이 중간 5.5ms, `big.py`가 CPU에서 4걸음 학습 → 저장 → ONNX 내보내기, 앱 변환 코드가 그 ONNX를 그대로 읽음.
 

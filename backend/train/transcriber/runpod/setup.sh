@@ -28,7 +28,8 @@ if [ ! -f $W/slakh_raw/.done ]; then
 fi
 echo "Slakh 받기 끝 $(date +%H:%M), 변환 시작"
 SRC=$(dirname "$(find $W/slakh_raw -maxdepth 3 -type d -name train | head -1)")
-python slakh_data.py prepare "$SRC" $W/slakh --procs "$(nproc)"
+# nproc은 서버 전체(48)를 보여 준다 — 컨테이너에 실제로 주어진 수만큼
+python slakh_data.py prepare "$SRC" $W/slakh --procs "$(python -c "import big; print(big.cpu_count())")"
 du -sh $W/slakh
 touch $W/slakh/.ready
 rm -rf $W/slakh_raw   # 변환이 끝나면 원본은 지운다 (디스크)

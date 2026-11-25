@@ -44,6 +44,7 @@ python runpod/watch.py <pod-id> --ssh "root@IP -p PORT" --floor 2
 ```
 
 - Slakh 출처: Manilow et al., "Cutting Music Source Separation Some Slakh: A Dataset to Study the Impact of Training Data Quality and Quantity", WASPAA 2019 (CC BY 4.0).
+- 2026-11-25 본 학습 1회(보안 RTX 4090, Slakh 600곡 + Surge, 5만 걸음 56분 · 약 $1.4): 섞인 루프 재현율은 올랐지만(중간 0.42 → 0.45~0.57) 조성이 69 → 61~64/88로 떨어졌다. 원인은 Slakh 정답의 옥타브 — 베이스는 악보 관례대로 한 옥타브 높게 적히고 소리는 그 아래라(BabySlakh 22개 중 21개), 모델이 베이스를 배음 자리로 적게 됐다(샘플팩 베이스 stem 음높이 중간 D2 → F#3). 이제 `slakh_data.py`가 stem마다 원래 Basic Pitch로 정답 옥타브를 확인해 옮기고(음이 가장 많은 30초 구간, 곡 전체와 판정 209개 중 204개 같음, 7.5배 빠름), 어느 옥타브로도 안 맞는 stem은 작은 묶음에서 빼며, 그런 stem이 크게 들리는 곡은 전체 믹스도 뺀다. BabySlakh: 베이스 22/22 · 금관 3/8 · 신스 리드 4/5 옮김, 피아노 · 현악은 그대로, 옮긴 방향은 F1로 잰 최고 옥타브와 37/40 같음(나머지는 F1이 0 근처).
 - 2026-11-25 RunPod 짧은 시험(공용 RTX 4090, 캐나다): 200걸음 21초(한 걸음 약 0.1초, 배치 64), `watch.py`가 체크포인트를 받아 오고 앱 변환 코드가 그대로 읽음. GPU에서만 나던 손실 nan(bf16에서 1 - 1e-4 → 1)과 CPU 수 오인(48개로 보고 실제 6.8개)을 고침. Zenodo 받는 속도는 초당 0.3~5MB로 들쭉날쭉.
 - BabySlakh(앞 20곡)로 이 PC에서 확인: 변환 20곡 33초 · 411MB, 정답 시작점과 모델 시작점 차이 중간 5.5ms, `big.py`가 CPU에서 4걸음 학습 → 저장 → ONNX 내보내기, 앱 변환 코드가 그 ONNX를 그대로 읽음.
 

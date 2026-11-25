@@ -41,13 +41,13 @@ def one(job: tuple[str, list[str], str, str, int]) -> str:
 
     track, files, raw, out, seed = job
     name = track.split("/")[1]
-    if (Path(out) / f"{name}.notes.npy").exists() or (Path(out) / f"{name}.skip").exists():
+    if (Path(out) / f"{name}.check.json").exists() or (Path(out) / f"{name}.skip").exists():
         return f"{name} 있음"
     try:
         for f in files:
             hf_hub_download(REPO, f, repo_type="dataset", local_dir=raw)
         msg = S.prepare_track((str(Path(raw) / track), out, seed))
-        if not (Path(out) / f"{name}.notes.npy").exists():
+        if not (Path(out) / f"{name}.check.json").exists():
             (Path(out) / f"{name}.skip").write_text(msg, encoding="utf-8")  # 악기 없음 등: 다시 받지 않게
         return msg
     except Exception as e:  # 네트워크 오류는 다음 실행에서 다시 받는다

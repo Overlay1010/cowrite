@@ -64,7 +64,7 @@ def ssh_parts(ssh: str, key: str | None) -> tuple[list[str], list[str], str]:
 def pull(ssh: str, key: str | None, out: Path) -> int:
     """새 체크포인트와 로그를 받는다. 받은 파일 수를 돌려준다."""
     sopt, copt, target = ssh_parts(ssh, key)
-    listing = run(["ssh", *sopt, target, f"cd {REMOTE} 2>/dev/null && find . -type f \\( -name '*.onnx' -o -name '*.pt' -o -name '*.log' \\) -printf '%s %p\\n'"], timeout=120)
+    listing = run(["ssh", *sopt, target, f"cd {REMOTE} 2>/dev/null || exit 0; find . -type f \\( -name '*.onnx' -o -name '*.pt' -o -name '*.log' \\) -printf '%s %p\\n'"], timeout=120)
     got = 0
     for line in listing.splitlines():
         size, rel = line.split(" ", 1)

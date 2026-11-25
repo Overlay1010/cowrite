@@ -69,9 +69,9 @@ def test_other_versions_change_pattern_then_sound_palette():
 
 
 def test_modern_pop_palette_moves_the_backbeat_to_a_clap():
-    _, drums = drums_of(eight_bars(), style="pop", version=3, real_groove=False)  # 팔레트 2: 일렉 킷 + 클랩 뒷박
+    _, drums = drums_of(eight_bars(), style="pop", version=1, real_groove=False)  # 팔레트 1: 일렉 킷 + 클랩 뒷박 (요즘 팝이 기본)
     assert drums.program == 24 and steps(drums, CLAP, 0) == [4, 12] and steps(drums, SNARE, 0) == []
-    _, played = drums_of(eight_bars(), style="pop", version=3)  # 실제 연주도 스네어를 클랩으로
+    _, played = drums_of(eight_bars(), style="pop", version=1)  # 실제 연주도 스네어를 클랩으로
     assert played.program == 24 and CLAP in {n.pitch for n in played.notes} and SNARE not in {n.pitch for n in played.notes}
 
 
@@ -170,7 +170,7 @@ def test_each_part_track_can_take_its_own_kit():
     hats = next(t for t in new_drums(r, p) if t.name == "Hats")
     changed = run_tool(r.project, "set_instrument", {"track_ids": [hats.id], "program": 26})
     programs = {t.name: t.program for t in changed.project.tracks if t.is_drum}
-    assert programs["Hats"] == 26 and programs["Kick"] == 0  # 햇만 909 킷
+    assert programs["Hats"] == 26 and programs["Kick"] == 24  # 햇만 909 킷 (팝 기본은 일렉 킷)
 
 
 # ---------- 하이햇 변주 · 롤 ----------

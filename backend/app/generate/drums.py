@@ -104,14 +104,18 @@ PALETTES: dict[str, list[Palette]] = {
         Palette(25, {KICK: "kick_electro", CLAP: "clap", HAT: "hat_808"}),
         Palette(25, {KICK: "kick_808", CLAP: "clap_909", HAT: "hat_crisp"}),
     ],
+    # 팝 · 소울 · 펑크는 전자 킷 조합으로 (2026-11-26, "드럼이 너무 다 어쿠스틱한데 요즘 전자음악 드럼이 더 좋을 것 같은데,
+    # 어쿠스틱은 너무 싼티 나는 소리로 깔려서"). 어쿠스틱 킷(스탠다드 · 룸)은 FluidR3 녹음이라 얇다. 록 · 재즈 · 라틴은 장르 소리라 그대로
     "pop": [
-        Palette(0),
         Palette(24, back=CLAP),  # 일렉 킷에 클랩 뒷박 (요즘 팝)
-        Palette(0, {KICK: "kick_punch", CLAP: "clap", HAT: "hat_crisp"}, back=CLAP),
+        Palette(25, {KICK: "kick_punch", CLAP: "clap", HAT: "hat_crisp"}, back=CLAP),
+        Palette(26, {KICK: "kick_electro", CLAP: "clap_909", HAT: "hat_909", OPEN: "openhat_909"}, back=CLAP),
     ],
     "rock": [Palette(16), Palette(0), Palette(8)],
-    "funk": [Palette(0), Palette(8), Palette(0, {KICK: "kick_punch", SNARE: "snare_big", HAT: "hat_crisp"})],
-    "soul": [Palette(8), Palette(0, {KICK: "kick_soft", SNARE: "snare_soft", HAT: "hat_acoustic"}), Palette(27)],
+    "funk": [Palette(24, {KICK: "kick_punch", SNARE: "snare_big", HAT: "hat_crisp"}), Palette(28),
+             Palette(26, {KICK: "kick_electro", SNARE: "snare_909", HAT: "hat_909"})],
+    "soul": [Palette(27), Palette(28, {KICK: "kick_soft", SNARE: "snare_boombap", HAT: "hat_crisp"}),
+             Palette(24, {KICK: "kick_punch", SNARE: "snare_soft", HAT: "hat_soft"})],
     "jazz": [Palette(32), Palette(32, {RIDE: "ride_jazz", KICK: "kick_soft"}), Palette(8, {RIDE: "ride_jazz"})],
     "latin": [Palette(0), Palette(8), Palette(32)],
 }

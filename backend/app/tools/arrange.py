@@ -241,8 +241,8 @@ def _drop_rubs(project: Project, done: list[dict], new_ids: list[str], wanted: l
     from app.arrange.review import OVERLAP
 
     harm = {i for d in done if d["part"].role in PATTERN for i in d["ids"]}
-    others = [n for t in project.tracks if t.id not in harm and not t.is_drum for n in t.notes]
-    dropped = 0
+    others = [(t.name, n) for t in project.tracks if t.id not in harm and not t.is_drum for n in t.notes]
+    dropped: dict[tuple[str, str], int] = {}  # (화음 트랙, 부딪힌 트랙) → 뺀 음 수 — 답이 다른 부딪힘과 섞어 말하지 않게 짝을 적는다
     tracks = []
     for t in project.tracks:
         if t.id not in harm:
@@ -253,11 +253,11 @@ def _drop_rubs(project: Project, done: list[dict], new_ids: list[str], wanted: l
             at[n.start] = at.get(n.start, 0) + 1
         keep = []
         for n in sorted(t.notes, key=lambda n: (n.start, n.pitch)):
-            rub = any(abs(n.pitch - o.pitch) % 12 in (1, 11)
-                      and min(n.start + n.duration, o.start + o.duration) - max(n.start, o.start) >= OVERLAP for o in others)
+            rub = next((name for name, o in others if abs(n.pitch - o.pitch) % 12 in (1, 11)
+                        and min(n.start + n.duration, o.start + o.duration) - max(n.start, o.start) >= OVERLAP), None)
             if rub and at[n.start] > 2:
                 at[n.start] -= 1
-                dropped += 1
+                dropped[(t.name, rub)] = dropped.get((t.name, rub), 0) + 1
                 continue
             keep.append(n)
         tracks.append(t.model_copy(update={"notes": keep}))
@@ -267,8 +267,23 @@ def _drop_rubs(project: Project, done: list[dict], new_ids: list[str], wanted: l
     after = review(fixed, set(new_ids), wanted)
     if _score(after) >= _score(report):
         return project, report, None
-    return fixed, after, (f"화음에서 멜로디 · 베이스와 반음으로 부딪히는 음 {dropped}개를 뺐어요"
-                          f" (부딪힘 {report.clash_beats:.1f} → {after.clash_beats:.1f}박)")
+    by_track: dict[str, list[str]] = {}
+    for (h, o), k in dropped.items():
+        by_track.setdefault(h, []).append(f"{o}({k}개)")
+    # 이유를 먼저 쓴다 — 뒤에 이유를 붙이면 답이 남은 다른 문제(원래 패드와 음역 겹침)를 이유로 바꿔 말했다
+    what = " / ".join(f"{', '.join(v)}가 반음으로 부딪혀서 {h}의 그 음 {sum(k for (hh, _), k in dropped.items() if hh == h)}개를 뺐어요"
+                      for h, v in by_track.items())
+    return fixed, after, f"{what} (부딪힘 {report.clash_beats:.1f} → {after.clash_beats:.1f}박)"
+
+
+def _review_for_llm(report) -> dict:  # noqa: ANN001
+    """문제 기준 아래 반음 부딪힘은 이름을 바꿔 보낸다 — "clashes"로 보내면 걸린 것으로 세어 "두 가지가 걸렸어요"라고 했다."""
+    from app.arrange.review import CLASH_LIMIT
+
+    data = report.data()
+    if report.clash_beats <= CLASH_LIMIT:
+        data["짧게 스치는 곳 (문제 아님)"] = data.pop("clashes")
+    return data
 
 
 def _bars_text(part: PartPlan, song_bars: int) -> str:
@@ -333,7 +348,8 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
         head += f" · {line}"
     # 문제 기준(CLASH_LIMIT) 아래라도 짧게 스치는 곳이 있으면 "없음"이라 하지 않는다 (에이전트는 세부 목록을 보고 말해서 앞뒤가 안 맞았다)
     rub = f" (짧게 스치는 반음 합쳐 {report.clash_beats:.1f}박)" if report.clashes else ""
-    tail = f"점검: 크게 부딪히는 곳 · 겹치는 음역 없음{rub}" if not report.problems else "점검에서 걸린 것: " + " / ".join(report.problems)
+    tail = (f"점검: 크게 부딪히는 곳 · 겹치는 음역 없음{rub}" if not report.problems
+            else ("고친 뒤에도 남은 것: " if fixes else "점검에서 걸린 것: ") + " / ".join(report.problems))
     if report.kick_lock is not None:
         tail += f" · 베이스가 킥과 같이 친 비율 {report.kick_lock:.0%}"
     return ToolResult(
@@ -341,9 +357,11 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
         changed_notes=sum(len(t.notes) for t in out.tracks if t.id in new_ids),
         changed_settings=True,
         summary=f"{head}. {tail}",
-        data={"parts": [{k: v for k, v in r.items() if k != "tracks"} for r in rows], "review": report.data(),
+        data={"parts": [{k: v for k, v in r.items() if k != "tracks"} for r in rows], "review": _review_for_llm(report),
               # 고쳐 놓고도 답에서 말하지 않고, 이미 해 본 "반주 옥타브 옮기기"를 남은 문제의 해법으로 제안했다 (브라우저, 2026-11-26)
-              **({"fixes": fixes, "note": "점검에 걸려 코드가 이미 고쳤어요(fixes) — 답에 고친 것을 한 줄로 말해. 새 화음 트랙의 높이 · 옥타브 · 보이싱은 "
+              **({"fixes": fixes, "note": "점검에 걸려 코드가 이미 고쳤어요(fixes). 답은 이 순서로: 고친 것을 fixes 그대로 한 문장(예: '리드와 반음으로 부딪히던 반주 음 13개를 뺐어요'), "
+                  "남은 것이 있으면 새 문장으로 '다만 … 남았어요' — 남은 것을 고친 이유처럼 '그래서'로 잇지 마. "
+                  "고친 것과 review의 남은 부딪힘은 따로라 섞지 마. 새 화음 트랙의 높이 · 옥타브 · 보이싱은 "
                   "이미 바꿔 봤으니 남은 문제의 해법으로 제안하지 마 (남은 음역 겹침은 원래 트랙과의 겹침)"} if fixes else {})},
         view={"arrange": {
             "style": DRUM_STYLES[args.style] if args.style else None, "progression": args.progression,

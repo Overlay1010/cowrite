@@ -404,7 +404,7 @@ def test_fix_loop_redoes_or_trims_chords_that_fail_the_check():
 
     p = midi_bytes_to_project(make_samples.SAMPLES["lofi_melody_pad.mid"](), name="mp")
     r = run_tool(p, "arrange", parts)
-    assert any("뺐어요" in f for f in r.view["arrange"]["fixes"])
+    assert any("Chords의 그 음" in f and "뺐어요" in f for f in r.view["arrange"]["fixes"])
     assert r.data["review"]["clash_beats"] < 2  # 남은 문제는 원래 있던 패드와 음역 겹침뿐 (사용자 트랙은 안 건드림)
     chords = by_name(r.project, "Chords")
     per_hit: dict[float, int] = {}

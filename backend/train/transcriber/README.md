@@ -14,6 +14,7 @@
 | `cymatics_data.py` | 구매한 샘플팩(samples/private)의 A 묶음만 학습 목록으로 (B는 평가용으로 남김). 이 PC에서만 쓰고 RunPod에는 올리지 않는다 |
 | `big.py` | Basic Pitch 위에 보정층(합성곱 + 트랜스포머, 267만 개)을 얹은 큰 모델. 처음엔 Basic Pitch와 같은 출력에서 출발. GPU · bf16, `--slakh` · `--surge`, `--max_minutes`로 시간 상한 |
 | `slakh_data.py` | Slakh2100(CC BY 4.0) → 곡마다 전체 믹스 + 악기 1~3개 작은 묶음 (22050Hz int16 .npy + 정답), 학습 중 메모리 매핑으로 구간만 읽음 |
+| `slakh_hf.py` | Slakh을 Hugging Face 사본(`WhiRik/slakh_flac`, redux와 같은 1,559곡 · 폴더 구조, 접근 동의 필요)에서 곡 단위로 받아 바로 변환하고 원본은 지운다. Zenodo tar.gz는 곡 파일이 뒤섞여 앞부분만으로는 온전한 곡이 없고 끊기면 이어 받을 수 없어서 |
 | `runpod/` | RunPod GPU에서: `setup.sh`(코드 · 패키지 · Slakh 받으면서 풀기 · 변환) → `SMOKE=1 run.sh`(200걸음) → `run.sh`(본 학습). 이 PC에서는 `watch.py`가 몇 분마다 체크포인트 · 로그를 `runs_gpu/`로 받아 오고, 잔액이 바닥에 가까우면 다 받은 뒤 Pod를 지운다 |
 
 ```bash
@@ -35,7 +36,7 @@ venv\Scripts\python train.py --onnx ../../app/midi_io/basic_pitch/nmp.onnx --out
 # 이 PC: Surge 루프 (샘플팩 MIDI 없이)
 python surge_render.py render "<Surge Synth Team>" surge_presets.json surge_clean --loops 10000 --procs 5
 # Pod (/workspace = 네트워크 볼륨): surge_clean을 /workspace/surge_clean으로 올린 뒤
-bash runpod/setup.sh            # 받는 게 느리면 MAX_GB=30 bash runpod/setup.sh (앞쪽 곡만)
+TRACKS=600 bash runpod/setup.sh  # HF 토큰을 ~/.cache/huggingface/token에 둔 뒤
 SMOKE=1 bash runpod/run.sh      # 한 걸음 시간 확인
 MAX_MIN=480 bash runpod/run.sh  # 본 학습, 1000걸음마다 저장
 # 이 PC: 학습하는 동안 계속 켜 둔다 (결과가 이 PC에 쌓여 Pod가 지워져도 남음)

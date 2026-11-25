@@ -82,6 +82,7 @@ export interface ArrangeView {
   problems: string[] // 점검에서 걸린 것 (비면 깨끗)
   kick_lock: number | null // 베이스가 킥과 같이 친 비율
   rub_beats: number // 문제 기준 아래로 짧게 스치는 반음 부딪힘 (박, 없으면 0)
+  fixes: string[] // 점검에 걸려 코드가 고친 것 (다시 깔기 · 부딪히는 음 빼기)
 }
 
 // 백엔드 app/tools/harmony.py suggest_reharmonization의 view

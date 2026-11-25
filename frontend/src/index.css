@@ -232,6 +232,7 @@ button.link { min-height: 0; margin-left: 8px; padding: 0; border: 0; background
 .arrange-check.warn { color: #f2e2a8; background: var(--warn-bg); }
 .arrange-check ul { margin: 0; padding-left: 16px; }
 .arrange-check .kick { color: var(--text-2); }
+.arrange-check .arrange-fixes { color: var(--text-2); }
 
 .preview-card {
   display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px;

@@ -393,3 +393,21 @@ def test_range_overlap_is_checked_per_phrase():
     same = comp.model_copy(update={"notes": notes(*[(p, b * 4.0 + i, 1.0) for b in range(8) for i in range(4) for p in (60, 64, 67, 71, 76)])})
     found = overlaps(Project(id="o", tracks=[lead, same]), {"t2"})
     assert len(found) == 1 and found[0].startswith("1~4마디에서")
+
+
+def test_fix_loop_redoes_or_trims_chords_that_fail_the_check():
+    """점검 → 고치기 → 다시 점검: 걸리면 반주를 다른 높이로 다시 깔고, 그래도 멜로디와 반음이면 그 화음 음만 뺀다 (같은 자리에 두 음은 남김)."""
+    parts = {"style": "pop", "parts": [{"role": "drums"}, {"role": "bass"}, {"role": "keys"}]}
+    p = midi_bytes_to_project(make_samples.SAMPLES["lofi_melody.mid"](), name="m")
+    r = run_tool(p, "arrange", parts)
+    assert r.view["arrange"]["fixes"] and "다시 깔았어요" in r.summary and r.view["arrange"]["problems"] == []
+
+    p = midi_bytes_to_project(make_samples.SAMPLES["lofi_melody_pad.mid"](), name="mp")
+    r = run_tool(p, "arrange", parts)
+    assert any("뺐어요" in f for f in r.view["arrange"]["fixes"])
+    assert r.data["review"]["clash_beats"] < 2  # 남은 문제는 원래 있던 패드와 음역 겹침뿐 (사용자 트랙은 안 건드림)
+    chords = by_name(r.project, "Chords")
+    per_hit: dict[float, int] = {}
+    for n in chords.notes:
+        per_hit[n.start] = per_hit.get(n.start, 0) + 1
+    assert min(per_hit.values()) >= 2

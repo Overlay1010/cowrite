@@ -147,6 +147,8 @@ def evaluate(model: str, workers: int) -> dict:
         "mean_cached_tokens": round(mean(r.get("cached_tokens", 0) for r in ok_rows)) if ok_rows else None,
         "mean_output_tokens": round(mean(r["output_tokens"] for r in ok_rows)) if ok_rows else None,
         "recovered": sum(r.get("recovered", False) for r in rows),
+        # 정답 채점(도구 · 인자)과 따로: 편곡 결과가 트랙끼리 점검에 걸린 명령 (도구는 맞게 골라도 결과가 부딪히면 여기 남는다)
+        "arrange_flagged": [r["id"] for r in rows if any(((st.get("view") or {}).get("arrange") or {}).get("problems") for st in r.get("steps", []))],
         "by_category": {k: f"{sum(r['passed'] for r in v)}/{len(v)}" for k, v in by_cat.items()},
     }
     return {"summary": summary, "rows": rows}
@@ -157,7 +159,8 @@ def print_report(result: dict) -> None:
     print(f"\n## {s['model']} · {s['passed']}/{s['cases']} 정답")
     print(f"도구 선택 {s['tool_choice_ok']}/{s['cases']} · 응답 시간 중앙값 {s['median_seconds']}초 · "
           f"LLM 호출 평균 {s['mean_llm_calls']}회 · 토큰 평균 {s['mean_input_tokens']}(캐시 {s.get('mean_cached_tokens') or 0})+{s['mean_output_tokens']} · "
-          f"오류 보고 스스로 고침 {s['recovered']}건")
+          f"오류 보고 스스로 고침 {s['recovered']}건 · 편곡 점검에 걸린 명령 {len(s.get('arrange_flagged', []))}개"
+          + (f" ({', '.join(s['arrange_flagged'])})" if s.get("arrange_flagged") else ""))
     print("분야별: " + " · ".join(f"{k} {v}" for k, v in s["by_category"].items()))
     for r in result["rows"]:
         if not r["passed"]:

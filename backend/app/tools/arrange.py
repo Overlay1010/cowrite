@@ -188,6 +188,89 @@ def _fill_lifts(project: Project, args: ArrangeArgs, parts: list[PartPlan], new_
     return project, rows, made
 
 
+def _score(report) -> tuple[int, float, int]:  # noqa: ANN001
+    return len(report.problems), round(report.clash_beats, 2), len(report.overlaps)
+
+
+def _fix(project: Project, args: ArrangeArgs, song_bars: int, done: list[dict], new_ids: list[str], wanted: list,
+         report):  # noqa: ANN001, ANN202
+    """고치기 (점검 → 고치기 → 다시 점검): 점검에 걸리면 새로 깐 화음 트랙을 다른 높이 · 보이싱으로 다시 깔아 보고 가장 덜 걸리는 것을 남긴다.
+    생성기가 음을 고를 때 이미 부딪힘을 피하지만 남는 게 많았다 — "드럼 · 베이스 · 반주"를 허밍 노래 40곡에 깔면 15~21곡,
+    저장소 샘플 MIDI 8곡 중 5~6곡이 점검에 걸렸다(반음 부딪힘 · 반주가 멜로디 음역에 겹침, 2026-11-26).
+    LLM에 맡기지 않는 건 결과가 매번 같고 숫자로 잴 수 있어서. 사용자가 높이를 말한 파트는 보이싱만 바꾼다. 화음 트랙 뒤쪽부터."""
+    lines: list[str] = []
+    for d in reversed([d for d in done if d["part"].role in PATTERN]):
+        if not report.problems:
+            break
+        part: PartPlan = d["part"]
+        heights = [part.height] if part.height else ["low", "mid", "high"]
+        best = (_score(report), project, d["ids"], report, None, None, d["height"], 1)
+        base = project.model_copy(update={"tracks": [t for t in project.tracks if t.id not in d["ids"]]})
+        others = [i for i in new_ids if i not in d["ids"]]
+        for h in heights:
+            for version in (1, 2):
+                if (h, version) == (d["height"] or part.height, 1):
+                    continue  # 처음 깐 것
+                try:
+                    res = _run_part(base, part, args, song_bars, h, version)
+                except ToolError:
+                    continue
+                assert res.project is not None
+                ids = _new_ids(base, res.project)
+                r = review(res.project, set(others + ids), wanted)
+                if _score(r) < best[0]:
+                    best = (_score(r), res.project, ids, r, res.summary, res.checks, h, version)
+        if best[4] is None:
+            continue
+        before = report
+        _, project, ids, report, summary, checks, h, version = best
+        new_ids[:] = [i for i in new_ids if i not in d["ids"]] + ids
+        d.update(ids=ids, height=h, summary=summary, checks=checks)
+        how = {"low": "낮게", "mid": "가운데로", "high": "높게"}.get(h or "", "")
+        lines.append(f"{ROLE_KO[part.role]}가 점검에 걸려 {how + ' · ' if how else ''}{'다른 보이싱으로 ' if version > 1 else ''}다시 깔았어요"
+                     f" (부딪힘 {before.clash_beats:.1f} → {report.clash_beats:.1f}박, 걸린 것 {len(before.problems)} → {len(report.problems)})")
+    if report.problems:
+        project, report, line = _drop_rubs(project, done, new_ids, wanted, report)
+        lines += [line] if line else []
+    return project, report, lines
+
+
+def _drop_rubs(project: Project, done: list[dict], new_ids: list[str], wanted: list, report):  # noqa: ANN001, ANN202
+    """그래도 걸리면 새 화음 트랙에서 다른 트랙(멜로디 · 베이스)과 반음으로 오래 부딪히는 음만 뺀다 — 점검과 같은 잣대(겹침 0.5박 · 단2/단9).
+    다시 깔아도 안 풀리는 건 화음 음 자체가 멜로디와 반음이라서였다(허밍 노래: 멜로디 D 위에 Eb 화음). 같은 자리에 두 음 넘게 남을 때만 뺀다."""
+    from app.arrange.review import OVERLAP
+
+    harm = {i for d in done if d["part"].role in PATTERN for i in d["ids"]}
+    others = [n for t in project.tracks if t.id not in harm and not t.is_drum for n in t.notes]
+    dropped = 0
+    tracks = []
+    for t in project.tracks:
+        if t.id not in harm:
+            tracks.append(t)
+            continue
+        at: dict[float, int] = {}
+        for n in t.notes:
+            at[n.start] = at.get(n.start, 0) + 1
+        keep = []
+        for n in sorted(t.notes, key=lambda n: (n.start, n.pitch)):
+            rub = any(abs(n.pitch - o.pitch) % 12 in (1, 11)
+                      and min(n.start + n.duration, o.start + o.duration) - max(n.start, o.start) >= OVERLAP for o in others)
+            if rub and at[n.start] > 2:
+                at[n.start] -= 1
+                dropped += 1
+                continue
+            keep.append(n)
+        tracks.append(t.model_copy(update={"notes": keep}))
+    if not dropped:
+        return project, report, None
+    fixed = project.model_copy(update={"tracks": tracks})
+    after = review(fixed, set(new_ids), wanted)
+    if _score(after) >= _score(report):
+        return project, report, None
+    return fixed, after, (f"화음에서 멜로디 · 베이스와 반음으로 부딪히는 음 {dropped}개를 뺐어요"
+                          f" (부딪힘 {report.clash_beats:.1f} → {after.clash_beats:.1f}박)")
+
+
 def _bars_text(part: PartPlan, song_bars: int) -> str:
     a, b = part.bars or (1, song_bars)
     return "전체" if (a, b) == (1, song_bars) else f"{a}~{b}마디"
@@ -206,7 +289,8 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
     harmonic = sum(1 for t in song.melodic if t.role in ("pad", "keys", "pluck")) + sum(1 for p in parts if p.role in PATTERN)
     out = project
     new_ids: list[str] = []
-    rows, checks, failed = [], [], []
+    rows, failed = [], []
+    done: list[dict] = []  # 깐 파트마다 {part, row, ids, height, summary, checks} — 고치기에서 다시 깔 때 바뀐다
     for part in parts:
         height = STACK.get(part.role) if harmonic >= 2 else None
         try:
@@ -219,9 +303,8 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
         made = _new_ids(out, res.project)
         out = res.project
         new_ids += made
-        checks += res.checks
-        rows.append({"role": part.role, "bars": _bars_text(part, song_bars), "ok": True, "summary": res.summary,
-                     "tracks": [t.name for t in out.tracks if t.id in made]})
+        rows.append({"role": part.role, "bars": _bars_text(part, song_bars), "ok": True, "summary": res.summary})
+        done.append({"part": part, "row": rows[-1], "ids": made, "height": height, "summary": res.summary, "checks": res.checks})
     if not new_ids:
         raise ToolError("계획한 파트를 하나도 깔지 못했어요 — " + " / ".join(failed), code="arrange_failed")
     wanted = [(tuple(lf.bars), lf.energy) for lf in args.lift or []]
@@ -231,16 +314,23 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
     rows += extra_rows
     new_ids += extra_ids
     report = review(out, set(new_ids), wanted)  # type: ignore[arg-type]
+    # shortcut: 꽉 채우려고 더한 화음(_fill_lifts)은 고치기에서 다시 깔지 않는다 — 그쪽이 점검에 자주 걸리면 done에 넣기
+    out, report, fixes = _fix(out, args, song_bars, done, new_ids, wanted, report)
+    checks = [c for d in done for c in d["checks"]]
+    for d in done:
+        d["row"].update(summary=d["summary"], tracks=[t.name for t in out.tracks if t.id in d["ids"]])
     walking = any(p.role == "bass" and (p.bass_style or GENRE_BASS_STYLE.get(args.style or "")) == "walking" for p in parts)
     if walking:  # 워킹 베이스는 킥을 따르지 않는다 (4분음표로 걸음) — 비율이 낮아도 문제처럼 읽히지 않게 뺀다
         report.kick_lock = None
-    done = " → ".join(f"{ROLE_KO[r['role']]}({r['bars']})" for r in rows if r["ok"] and not r.get("auto"))
-    head = f"계획대로 깔았어요: {done}" + (f" · 장르 {DRUM_STYLES[args.style]}" if args.style else "")
+    plan = " → ".join(f"{ROLE_KO[r['role']]}({r['bars']})" for r in rows if r["ok"] and not r.get("auto"))
+    head = f"계획대로 깔았어요: {plan}" + (f" · 장르 {DRUM_STYLES[args.style]}" if args.style else "")
     for r in rows:
         if r.get("auto"):
             head += f" · {r['bars']}가 드럼만으로는 꽉 차지 않아 그 구간에만 {ROLE_KO[r['role']]}를 더했어요"
     if failed:
         head += " · 못 깐 파트: " + " / ".join(failed)
+    for line in fixes:
+        head += f" · {line}"
     # 문제 기준(CLASH_LIMIT) 아래라도 짧게 스치는 곳이 있으면 "없음"이라 하지 않는다 (에이전트는 세부 목록을 보고 말해서 앞뒤가 안 맞았다)
     rub = f" (짧게 스치는 반음 합쳐 {report.clash_beats:.1f}박)" if report.clashes else ""
     tail = f"점검: 크게 부딪히는 곳 · 겹치는 음역 없음{rub}" if not report.problems else "점검에서 걸린 것: " + " / ".join(report.problems)
@@ -251,11 +341,15 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
         changed_notes=sum(len(t.notes) for t in out.tracks if t.id in new_ids),
         changed_settings=True,
         summary=f"{head}. {tail}",
-        data={"parts": [{k: v for k, v in r.items() if k != "tracks"} for r in rows], "review": report.data()},
+        data={"parts": [{k: v for k, v in r.items() if k != "tracks"} for r in rows], "review": report.data(),
+              # 고쳐 놓고도 답에서 말하지 않고, 이미 해 본 "반주 옥타브 옮기기"를 남은 문제의 해법으로 제안했다 (브라우저, 2026-11-26)
+              **({"fixes": fixes, "note": "점검에 걸려 코드가 이미 고쳤어요(fixes) — 답에 고친 것을 한 줄로 말해. 새 화음 트랙의 높이 · 옥타브 · 보이싱은 "
+                  "이미 바꿔 봤으니 남은 문제의 해법으로 제안하지 마 (남은 음역 겹침은 원래 트랙과의 겹침)"} if fixes else {})},
         view={"arrange": {
             "style": DRUM_STYLES[args.style] if args.style else None, "progression": args.progression,
             "parts": rows, "lift": [{"bars": list(lf.bars), "energy": lf.energy} for lf in args.lift or []],
             "problems": report.problems, "kick_lock": report.kick_lock, "rub_beats": round(report.clash_beats, 1) if report.clashes else 0,
+            "fixes": fixes,
         }},
         checks=checks,
     )

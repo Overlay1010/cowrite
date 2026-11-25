@@ -294,6 +294,13 @@ function ArrangeCard({ view }: { view: ArrangeView }) {
             {view.rub_beats > 0 && ` (짧게 스치는 반음 합쳐 ${view.rub_beats}박)`}
           </span>
         )}
+        {!!view.fixes?.length && (
+          <ul className="arrange-fixes">
+            {view.fixes.map((f) => (
+              <li key={f}>고침 · {f}</li>
+            ))}
+          </ul>
+        )}
         {view.kick_lock !== null && <span className="kick">베이스가 킥과 같이 친 비율 {Math.round(view.kick_lock * 100)}%</span>}
       </div>
     </div>

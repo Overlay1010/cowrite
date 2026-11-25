@@ -289,7 +289,10 @@ function ArrangeCard({ view }: { view: ArrangeView }) {
             </ul>
           </>
         ) : (
-          <span>점검 통과 · 트랙끼리 부딪히는 곳 · 겹치는 음역 없음</span>
+          <span>
+            점검 통과 · 크게 부딪히는 곳 · 겹치는 음역 없음
+            {view.rub_beats > 0 && ` (짧게 스치는 반음 합쳐 ${view.rub_beats}박)`}
+          </span>
         )}
         {view.kick_lock !== null && <span className="kick">베이스가 킥과 같이 친 비율 {Math.round(view.kick_lock * 100)}%</span>}
       </div>

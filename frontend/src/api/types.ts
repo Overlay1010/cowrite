@@ -81,6 +81,7 @@ export interface ArrangeView {
   lift: { bars: [number, number]; energy: 'higher' | 'lower' }[]
   problems: string[] // 점검에서 걸린 것 (비면 깨끗)
   kick_lock: number | null // 베이스가 킥과 같이 친 비율
+  rub_beats: number // 문제 기준 아래로 짧게 스치는 반음 부딪힘 (박, 없으면 0)
 }
 
 // 백엔드 app/tools/harmony.py suggest_reharmonization의 view

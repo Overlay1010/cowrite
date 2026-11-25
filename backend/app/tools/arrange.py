@@ -241,7 +241,9 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
             head += f" · {r['bars']}가 드럼만으로는 꽉 차지 않아 그 구간에만 {ROLE_KO[r['role']]}를 더했어요"
     if failed:
         head += " · 못 깐 파트: " + " / ".join(failed)
-    tail = "점검: 트랙끼리 부딪히는 곳 · 겹치는 음역 없음" if not report.problems else "점검에서 걸린 것: " + " / ".join(report.problems)
+    # 문제 기준(CLASH_LIMIT) 아래라도 짧게 스치는 곳이 있으면 "없음"이라 하지 않는다 (에이전트는 세부 목록을 보고 말해서 앞뒤가 안 맞았다)
+    rub = f" (짧게 스치는 반음 합쳐 {report.clash_beats:.1f}박)" if report.clashes else ""
+    tail = f"점검: 크게 부딪히는 곳 · 겹치는 음역 없음{rub}" if not report.problems else "점검에서 걸린 것: " + " / ".join(report.problems)
     if report.kick_lock is not None:
         tail += f" · 베이스가 킥과 같이 친 비율 {report.kick_lock:.0%}"
     return ToolResult(
@@ -253,7 +255,7 @@ def arrange(project: Project, args: ArrangeArgs) -> ToolResult:
         view={"arrange": {
             "style": DRUM_STYLES[args.style] if args.style else None, "progression": args.progression,
             "parts": rows, "lift": [{"bars": list(lf.bars), "energy": lf.energy} for lf in args.lift or []],
-            "problems": report.problems, "kick_lock": report.kick_lock,
+            "problems": report.problems, "kick_lock": report.kick_lock, "rub_beats": round(report.clash_beats, 1) if report.clashes else 0,
         }},
         checks=checks,
     )

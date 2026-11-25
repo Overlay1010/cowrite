@@ -68,7 +68,7 @@ class _MakeArgs(BaseModel):
         description='사용자가 말한 코드 진행 (예: ["C", "Am", "F", "G"]). 말한 그대로 적어. 없으면 비워 둬 — 곡의 코드를 따른다',
     )
     bars_per_chord: Literal[0.5, 1, 2, 4] = Field(default=1, description="progression에서 한 코드의 마디 수 (\"반 마디씩\" = 0.5)")
-    program: int | None = Field(default=None, ge=0, le=127, description="악기(General MIDI). 말이 없으면 비워 둬 — 곡 편성에 맞춰 고른다")
+    program: int | None = Field(default=None, ge=0, le=127, description="악기(General MIDI). 악기 이름을 말했으면 꼭 넣어 ('하프 아르페지오' → 46). 말이 없으면 비워 둬 — 곡 편성에 맞춰 고른다")
     name: str | None = Field(default=None, max_length=40, description="새 트랙 이름. 없으면 기본 이름")
     bars: tuple[Bar, Bar] | None = Field(default=None, description="[시작, 끝] 마디, 끝 포함. 없으면 곡 전체")
     beats: tuple[float, float] | None = Field(default=None, description="[시작, 끝) 박 — 화면에서 고른 부분. bars와 함께 쓰지 마")

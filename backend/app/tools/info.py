@@ -29,9 +29,12 @@ def get_project_info(project: Project, args: ProjectInfoArgs | None = None) -> T
     from app.arrange.sections import describe
 
     structure = read_song(project).structure
+    lines: list[str] = []
     if structure and structure.sections:
         if len(structure.sections) == 1:
-            summary += f"\n- 구간: 한 구간짜리 루프 (편성 · 세기가 바뀌는 곳이 없음). 프레이즈 {structure.phrase}마디"
+            lines = [f"- 구간: 한 구간짜리 루프 (편성 · 세기가 바뀌는 곳이 없음). 프레이즈 {structure.phrase}마디"]
         else:
-            summary += "\n" + "\n".join(describe(structure, project.beats_per_bar))
-    return ToolResult(summary=summary, data=info.model_dump(mode="json"))
+            lines = describe(structure, project.beats_per_bar)
+        summary += "\n" + "\n".join(lines)
+    # 구간도 data에 — 트랙 목록 JSON만 보고 "마디별 정보가 없다"며 구간을 묻던 일이 있었다 (평가 J04 · J05, 2026-11-26)
+    return ToolResult(summary=summary, data={**info.model_dump(mode="json"), "structure": lines})

@@ -463,7 +463,7 @@ class GrooveFromLoopArgs(BaseModel):
 
     sample: str | None = Field(default=None, description="루프 이름 일부 또는 id. 리듬이 있는 루프가 하나뿐이면 비워 둬도 된다")
     track_id: str | None = Field(
-        default=None, description="이 드럼 트랙의 하이햇을 루프 리듬으로 바꾼다 (Hats 트랙 · 드럼 트랙). 없으면 새 Hats 트랙을 만든다",
+        default=None, description="있는 하이햇을 루프 리듬으로 바꿔 달라고 할 때만 ('Hats 트랙을 루프처럼'). '깔아줘 · 넣어줘'면 비워 둬 — 새 Hats 트랙, 원래 드럼은 그대로",
     )
     bars: tuple[Bar, Bar] | None = Field(default=None, description="[시작, 끝] 마디, 끝 포함. 없으면 곡 전체")
 

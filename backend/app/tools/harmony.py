@@ -179,7 +179,8 @@ def suggest_reharmonization(project: Project, args: SuggestReharmonizationArgs |
     bars = list(args.bars) if args.bars else [int(start // bpb) + 1, math.ceil(end / bpb - 1e-6)] if args.beats else None
     return ToolResult(
         summary=f"조성 {a.key.name} · {span} 리하모니 제안 {len(sugs)}개 ({' · '.join(s.style for s in sugs)})",
-        data={"key": a.key.name, "suggestions": items},
+        # 제안을 설명하다 "분위기를 바꿨어요"라고 해 이미 바꾼 것처럼 들렸다 (평가 R02, 2026-11-26 다섯 번 중 다섯 번)
+        data={"key": a.key.name, "suggestions": items, "note": "제안만 했고 음은 아직 그대로 — 답에서 '바꿨어요'가 아니라 '바꿔 볼 수 있어요'"},
         view={"reharm": {"base": [_chord_view(c) for c in a.chords], "suggestions": views, "bars": bars}},
     )
 

@@ -24,7 +24,7 @@ interface ProjectState {
    * MIDI · 오디오를 연다. 이름에 템포가 없는 오디오는 먼저 템포를 묻는다(askTempo에 담아 두고 끝).
    * bpm을 주면 그 템포로, null이면 묻지 않고 소리로 짐작한다.
    */
-  upload: (file: File, bpm?: number | null) => Promise<void>
+  upload: (file: File, bpm?: number | null, mono?: boolean) => Promise<void>
   /** 템포를 물어보는 중인 오디오 파일 */
   askTempo: File | null
   cancelAskTempo: () => void
@@ -124,14 +124,15 @@ export const useProject = create<ProjectState>((set, get) => {
     askTempo: null,
     cancelAskTempo: () => set({ askTempo: null }),
 
-    upload: async (file, bpm) => {
+    upload: async (file, bpm, mono = false) => {
+      // shortcut: 허밍은 템포 묻는 창에서만 고른다 — 이름에 BPM이 있는 허밍 파일은 창이 안 떠 악기로 읽힘, 불편하다는 말이 나오면 따로 고르는 곳을
       if (bpm === undefined && api.AUDIO_TO_MIDI.test(file.name) && api.bpmFromName(file.name) === null) {
         set({ askTempo: file, error: null })
         return
       }
       set({ loading: true, error: null, askTempo: null })
       try {
-        const project = await api.uploadMidi(file, bpm ?? undefined)
+        const project = await api.uploadMidi(file, bpm ?? undefined, mono)
         set({
           project,
           preview: null,

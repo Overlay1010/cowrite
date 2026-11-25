@@ -39,11 +39,12 @@ export function bpmFromName(name: string): number | null {
   return bpm >= 40 && bpm <= 300 ? bpm : null
 }
 
-/** MIDI를 열거나 오디오를 음표로 바꿔 연다 (bpm: 오디오를 이 템포로 읽기, 없으면 이름 → 짐작) */
-export async function uploadMidi(file: File, bpm?: number): Promise<Project> {
+/** MIDI를 열거나 오디오를 음표로 바꿔 연다 (bpm: 오디오를 이 템포로 읽기, 없으면 이름 → 짐작 · mono: 허밍 · 노래를 한 음씩) */
+export async function uploadMidi(file: File, bpm?: number, mono = false): Promise<Project> {
   const form = new FormData()
   form.append('file', file)
   if (bpm !== undefined) form.append('bpm', String(bpm))
+  if (mono) form.append('mono', 'true')
   return parse<Project>(await fetch(`${BASE}/projects`, { method: 'POST', body: form }))
 }
 

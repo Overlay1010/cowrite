@@ -145,3 +145,18 @@ def test_broken_audio(client, name):
     r = client.post("/api/v1/projects", files={"file": (name, b"\x00\x05\x16\x07 not audio", "audio/wav")})
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "audio_parse_failed"
+
+
+def test_monophonic_keeps_the_louder_of_overlapping_notes():
+    got = T.monophonic([N(0.0, 1.0, 60, 0.8), N(0.5, 0.7, 61, 0.3), N(1.0, 2.0, 62, 0.5), N(1.5, 2.5, 74, 0.9)])
+    assert [(e.start, e.pitch) for e in got] == [(0.0, 60), (1.5, 74)]  # 겹치는 약한 음(61 · 62)은 빠진다
+
+
+def test_upload_humming_reads_one_note_at_a_time(client):
+    wav = render([(60, 0, 4), (64, 0, 4), (67, 0, 4)], 120, 4)  # 화음 — 보통은 세 음, 허밍으로 읽으면 겹치지 않게
+    chord = client.post("/api/v1/projects", files={"file": ("c - 120 BPM.wav", wav, "audio/wav")}).json()
+    hum = client.post("/api/v1/projects", files={"file": ("c - 120 BPM.wav", wav, "audio/wav")}, data={"mono": "true"}).json()
+    assert len(chord["tracks"][0]["notes"]) >= 3 and "허밍" not in chord["warnings"][0]
+    notes = sorted(hum["tracks"][0]["notes"], key=lambda n: n["start"])
+    assert notes and all(a["start"] + a["duration"] <= b["start"] + 1e-6 for a, b in zip(notes, notes[1:]))
+    assert "허밍" in hum["warnings"][0]

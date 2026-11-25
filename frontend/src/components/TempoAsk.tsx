@@ -5,16 +5,19 @@ import { useProject } from '../store/project'
 export function TempoAsk() {
   const { askTempo, upload, cancelAskTempo } = useProject()
   const [text, setText] = useState('')
+  const [mono, setMono] = useState(false)
   if (!askTempo) return null
   const bpm = Number(text)
   const valid = text.trim() !== '' && bpm >= 40 && bpm <= 300
   const close = () => {
     setText('')
+    setMono(false)
     cancelAskTempo()
   }
   const open = (value: number | null) => {
     setText('')
-    void upload(askTempo, value)
+    setMono(false)
+    void upload(askTempo, value, mono)
   }
   return (
     <>
@@ -49,6 +52,10 @@ export function TempoAsk() {
             autoFocus
           />
           <span>BPM</span>
+        </label>
+        <label className="tempo-ask-mono">
+          <input type="checkbox" checked={mono} onChange={(e) => setMono(e.target.checked)} />
+          <span>허밍 · 노래예요 (한 번에 한 음씩 읽기)</span>
         </label>
         <div className="tempo-ask-actions">
           <button type="button" onClick={close}>

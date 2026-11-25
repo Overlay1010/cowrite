@@ -61,8 +61,10 @@ def recent_projects() -> list[RecentOut]:
 
 
 @router.post("", response_model=Project)
-async def upload_midi(file: UploadFile = File(...), bpm: float | None = Form(default=None, gt=0, le=400)) -> Project:
-    """MIDI를 열거나, 오디오(WAV 등)를 음표로 바꿔 연다. bpm은 오디오에만 쓴다 (없으면 파일 이름 → 짐작)."""
+async def upload_midi(
+    file: UploadFile = File(...), bpm: float | None = Form(default=None, gt=0, le=400), mono: bool = Form(default=False)
+) -> Project:
+    """MIDI를 열거나, 오디오(WAV 등)를 음표로 바꿔 연다. bpm · mono(허밍 · 노래: 한 번에 한 음)는 오디오에만 쓴다."""
     filename = file.filename or "untitled.mid"
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES | AUDIO_SUFFIXES:
@@ -76,7 +78,7 @@ async def upload_midi(file: UploadFile = File(...), bpm: float | None = Form(def
 
     try:
         if audio:
-            project = await run_in_threadpool(audio_bytes_to_project, data, Path(filename).stem, bpm)
+            project = await run_in_threadpool(audio_bytes_to_project, data, Path(filename).stem, bpm, mono)
         else:
             project = midi_bytes_to_project(data, name=Path(filename).stem)
     except MidiParseError as e:

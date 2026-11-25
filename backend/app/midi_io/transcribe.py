@@ -259,6 +259,17 @@ def quantize(events: list[NoteEvent], bpm: float) -> tuple[list[NoteEvent], bool
     return sorted(out.values(), key=lambda n: (n.start, n.pitch)), True
 
 
+def monophonic(events: list[NoteEvent]) -> list[NoteEvent]:
+    """한 번에 한 음: 겹치면 더 센 음만 남긴다 (허밍 · 노래). 모델이 떨림 · 미끄러짐을 겹친 음으로 적는 것을 지운다.
+    Vocadito(혼자 부른 노래 40곡, CC BY 4.0)에서 음 F1 중간 0.44 → 0.53 (사람 둘끼리 0.72). 소리만으로 단선율인지 가르는 건
+    샘플팩 악기 파일과 겹쳐 믿을 수 없어서 사용자가 고른다."""
+    keep: list[NoteEvent] = []
+    for e in sorted(events, key=lambda n: -n.amplitude):
+        if all(e.end <= k.start or e.start >= k.end for k in keep):
+            keep.append(e)
+    return sorted(keep, key=lambda n: (n.start, n.pitch))
+
+
 def transcribe(audio: np.ndarray) -> list[NoteEvent]:
     return transcribe_audio(audio).events
 
@@ -343,10 +354,14 @@ def events_to_project(events: list[NoteEvent], name: str, bpm: float, warnings: 
     )
 
 
-def audio_bytes_to_project(data: bytes, name: str, bpm: float | None = None) -> Project:
+def audio_bytes_to_project(data: bytes, name: str, bpm: float | None = None, mono: bool = False) -> Project:
     tr = transcribe_audio(load_audio(data))
-    events = tr.events
-    warnings = ["오디오에서 음을 읽어 만든 MIDI예요. 여러 악기가 섞인 소리는 음이 빠지거나 더 생길 수 있어요."]
+    events = monophonic(tr.events) if mono else tr.events
+    warnings = [
+        "허밍 · 노래를 한 번에 한 음씩 읽어 만든 MIDI예요. 음이 바뀌는 자리는 조금 다를 수 있어요."
+        if mono
+        else "오디오에서 음을 읽어 만든 MIDI예요. 여러 악기가 섞인 소리는 음이 빠지거나 더 생길 수 있어요."
+    ]
     if bpm is None:
         bpm = bpm_from_name(name)
         if bpm is None:
